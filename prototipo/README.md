@@ -10,7 +10,11 @@ npm run dev
 
 Se abre en `http://localhost:5199/?variant=A`. La barra inferior cambia entre A y B (también con ← y →) y conserva la Partida en curso. Su botón «Escenas» lleva a una captura, un jaque, una Coronación, un jaque mate, un ahogado y un enroque, y deja activar la vista móvil y el modo sin movimiento.
 
+La comparación de sonidos está en `http://localhost:5199/sonidos/index.html`.
+
 ## Avisos de terceros
+
+- **Sonidos de prueba:** packs Casino Audio, RPG Audio, Interface Sounds y Music Jingles de [Kenney](https://kenney.nl), CC0 1.0. Sin modificar.
 
 - **Piezas de Café:** [RhosGFX](https://rhosgfx.itch.io/vector-chess-pieces), CC0 1.0. Sin modificar.
 - **Piezas de Gala:** Fantasy, de [Maurizio Monge (chess-art)](https://github.com/maurimo/chess-art), MIT. Coloreadas con `scripts/colorear-fantasy.mjs`. Licencia en `public/piezas/base-fantasy/LICENSE-chess-art.txt`.
