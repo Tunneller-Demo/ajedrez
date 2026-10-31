@@ -28,8 +28,8 @@ const nombreDelBando = (bando: Bando) => (bando === 'w' ? 'blancas' : 'negras')
 
 function nombreDePieza({ tipo, bando }: Pieza) {
   const { nombre, femenino } = NOMBRES[tipo]
-  const color = bando === 'w' ? (femenino ? 'blanca' : 'blanco') : femenino ? 'negra' : 'negro'
-  return `${nombre} ${color}`
+  const adjetivo = bando === 'w' ? (femenino ? 'blanca' : 'blanco') : femenino ? 'negra' : 'negro'
+  return `${nombre} ${adjetivo}`
 }
 
 function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {

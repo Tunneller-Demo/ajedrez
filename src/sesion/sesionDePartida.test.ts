@@ -96,6 +96,15 @@ describe('al seleccionar', () => {
     expect(sesion.obtenerEstado().seleccion).toBeNull()
   })
 
+  it('una pieza sin Jugadas queda seleccionada, sin destinos', () => {
+    const sesion = nueva()
+
+    sesion.tocarCasilla('a1')
+
+    expect(sesion.obtenerEstado().seleccion).toBe('a1')
+    expect(sesion.obtenerEstado().destinos).toEqual([])
+  })
+
   it('marca como captura el destino de una pieza rival, también al paso', () => {
     const sesion = nueva('1. e4 d5 2. e5 f5')
 
@@ -149,11 +158,11 @@ describe('al jugar', () => {
   it('avisa a quien observa el estado', () => {
     const sesion = nueva()
     let avisos = 0
-    const dejar = sesion.suscribir(() => avisos++)
+    const cancelarSuscripcion = sesion.suscribir(() => avisos++)
 
     sesion.tocarCasilla('e2')
     sesion.tocarCasilla('e4')
-    dejar()
+    cancelarSuscripcion()
     sesion.tocarCasilla('e7')
     sesion.tocarCasilla('e5')
 
@@ -375,12 +384,13 @@ describe('Resultado', () => {
     expect(sesion.obtenerEstado().resultado).toEqual({ tipo: 'tablas', motivo: 'material-insuficiente' })
   })
 
-  it('una Partida terminada ignora los toques', () => {
+  it('una Partida terminada ignora toda acción', () => {
     const sesion = nueva('1. f3 e5 2. g4 Qh4#')
     const antes = sesion.obtenerEstado()
 
     sesion.tocarCasilla('e1')
     sesion.tocarCasilla('a2')
+    sesion.coronar('q')
 
     expect(antes.resultado).toEqual({ tipo: 'jaque-mate', ganador: 'b' })
     expect(sesion.obtenerEstado()).toBe(antes)

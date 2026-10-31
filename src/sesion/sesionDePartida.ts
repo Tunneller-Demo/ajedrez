@@ -129,8 +129,8 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
     if (seleccion && opciones[0]?.isPromotion()) return publicar(seleccion, { desde: seleccion, hasta: casilla })
     if (opciones[0]) return jugar(opciones[0])
 
-    const nueva = chess.get(casilla)?.color === chess.turn() && casilla !== seleccion ? casilla : null
-    if (nueva !== seleccion) publicar(nueva, null)
+    const nuevaSeleccion = chess.get(casilla)?.color === chess.turn() && casilla !== seleccion ? casilla : null
+    if (nuevaSeleccion !== seleccion) publicar(nuevaSeleccion, null)
   }
 
   function coronar(pieza: PieceSymbol) {
