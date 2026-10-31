@@ -1,6 +1,6 @@
 # Ajedrez
 
-Ajedrez web para que dos personas jueguen una Partida en el mismo dispositivo.
+Ajedrez web para jugar una Partida entre dos personas en el mismo dispositivo o contra la Máquina.
 
 ## Language
 
@@ -11,6 +11,10 @@ _Avoid_: Juego, match
 **Bando**:
 Cada una de las dos partes de la Partida: blancas o negras.
 _Avoid_: Color, jugador, equipo
+
+**Máquina**:
+El rival que lleva un Bando de la Partida en lugar de una persona.
+_Avoid_: Bot, IA, CPU, motor
 
 **Jugada**:
 El movimiento de un solo Bando. Es la unidad del Historial y de Deshacer.
