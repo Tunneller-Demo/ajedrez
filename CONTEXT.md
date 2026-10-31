@@ -25,7 +25,7 @@ La fuerza con la que juega la Máquina en una Partida.
 _Avoid_: Dificultad
 
 **Jugada**:
-El movimiento de un solo Bando. Es la unidad del Historial y de Deshacer.
+El movimiento de un solo Bando. Es la unidad del Historial.
 _Avoid_: Medio movimiento, ply, turno
 
 **Historial**:
@@ -33,7 +33,7 @@ La lista de las Jugadas de la Partida, en orden y escritas con figuritas de piez
 _Avoid_: Registro, log
 
 **Deshacer**:
-Retirar la última Jugada del Historial y volver a la posición anterior. Se puede repetir hasta el inicio de la Partida, también tras su Resultado.
+Retirar la última Jugada del Historial y volver a la posición anterior; contra la Máquina, retirar Jugadas hasta que vuelve a tocar a la persona. Se puede repetir hasta el inicio de la Partida, también tras su Resultado.
 _Avoid_: Revertir, atrás
 
 **Coronación**:
