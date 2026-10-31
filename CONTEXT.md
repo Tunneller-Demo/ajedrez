@@ -12,9 +12,17 @@ _Avoid_: Juego, match
 Cada una de las dos partes de la Partida: blancas o negras.
 _Avoid_: Color, jugador, equipo
 
+**Rival**:
+Quien lleva el Bando contrario de la Partida: otra persona o la Máquina.
+_Avoid_: Oponente, adversario
+
 **Máquina**:
-El rival que lleva un Bando de la Partida en lugar de una persona.
+El Rival que lleva un Bando de la Partida en lugar de una persona.
 _Avoid_: Bot, IA, CPU, motor
+
+**Nivel**:
+La fuerza con la que juega la Máquina en una Partida.
+_Avoid_: Dificultad
 
 **Jugada**:
 El movimiento de un solo Bando. Es la unidad del Historial y de Deshacer.
