@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #26262b;
+}
+
+/* Las direcciones usan consultas de contenedor para que la vista móvil de la barra sea fiel. */
+.marco {
+  container: app / size;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100dvh;
+}
+
+.marco.movil {
+  width: 390px;
+  height: min(844px, calc(100dvh - 24px));
+  margin: 12px auto 0;
+  border-radius: 28px;
+  box-shadow: 0 0 0 8px #0a0a0c;
+}
+
+/* Mecánica común del tablero */
+.tablero {
+  position: relative;
+  width: var(--lado);
+  height: var(--lado);
+  flex: none;
+}
+
+.casillas {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+}
+
+.casilla {
+  position: relative;
+  cursor: pointer;
+  outline: none;
+}
+
+.capa-piezas,
+.capa-efectos {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pieza {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 12.5%;
+  height: 12.5%;
+  will-change: transform;
+}
+
+.pieza-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+.coord {
+  position: absolute;
+  font-size: clamp(9px, 1.6cqmin, 13px);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.coord.fila {
+  top: 4%;
+  left: 5%;
+}
+
+.coord.columna {
+  right: 6%;
+  bottom: 4%;
+}
+
+/* Modo sin movimiento: forzado desde la barra o pedido por el sistema */
+.sin-movimiento *,
+.sin-movimiento *::before,
+.sin-movimiento *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+.sin-movimiento .solo-movimiento {
+  display: none !important;
+}
