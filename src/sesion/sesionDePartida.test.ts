@@ -243,6 +243,65 @@ describe('última Jugada', () => {
   })
 })
 
+describe('Historial', () => {
+  it('está vacío al empezar', () => {
+    expect(nueva().obtenerEstado().historial).toEqual([])
+  })
+
+  it('escribe las Jugadas en orden, con figuritas de pieza', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4', 'e7 e5', 'g1 f3', 'd8 h4', 'f3 e5')
+
+    expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5', '♞f3', '♛h4', '♞xe5'])
+  })
+
+  it('deja el enroque en su notación y marca la Coronación con su figurita', () => {
+    expect(nueva('1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O').obtenerEstado().historial).toContain('O-O')
+
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+    jugar(sesion, 'a7 a8')
+    sesion.coronar('r')
+
+    expect(sesion.obtenerEstado().historial).toEqual(['a8=♜'])
+  })
+
+  it('se recupera de una Partida restaurada', () => {
+    expect(nueva('1. e4 d5 2. exd5').obtenerEstado().historial).toEqual(['e4', 'd5', 'exd5'])
+  })
+})
+
+describe('capturadas', () => {
+  it('no hay ninguna al empezar', () => {
+    expect(nueva().obtenerEstado().capturadas).toEqual({ w: [], b: [] })
+  })
+
+  it('se guardan junto al Bando que capturó, en orden de captura', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4', 'd7 d5', 'e4 d5', 'd8 d5', 'b1 c3', 'd5 a2', 'a1 a2')
+
+    expect(sesion.obtenerEstado().capturadas).toEqual({ w: ['p', 'q'], b: ['p', 'p'] })
+  })
+
+  it('incluyen la captura al paso', () => {
+    const sesion = nueva('1. e4 d5 2. e5 f5')
+
+    jugar(sesion, 'e5 f6')
+
+    expect(sesion.obtenerEstado().capturadas).toEqual({ w: ['p'], b: [] })
+  })
+
+  it('una Coronación no cuenta como captura si no captura', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    sesion.coronar('q')
+
+    expect(sesion.obtenerEstado().capturadas).toEqual({ w: [], b: [] })
+  })
+})
+
 describe('Jugadas especiales', () => {
   const enroques = '1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. d3 d6 5. Bd2 Bd7 6. Nc3 Qe7 7. Qe2'
 
@@ -281,6 +340,201 @@ describe('Jugadas especiales', () => {
     expect(piezaEn(estado, 'f6')).toEqual({ casilla: 'f6', tipo: 'p', bando: 'w' })
     expect(piezaEn(estado, 'f5')).toBeUndefined()
     expect(eventos[0].captura).toEqual({ pieza: 'p', casilla: 'f5' })
+  })
+})
+
+describe('Deshacer a dos', () => {
+  it('retira una sola Jugada y devuelve el turno', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4', 'e7 e5')
+    sesion.deshacer()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado.historial).toEqual(['e4'])
+    expect(estado.turno).toBe('b')
+    expect(piezaEn(estado, 'e7')?.tipo).toBe('p')
+    expect(piezaEn(estado, 'e5')).toBeUndefined()
+    expect(estado.ultimaJugada).toEqual({ desde: 'e2', hasta: 'e4' })
+  })
+
+  it('llega hasta el inicio de la Partida, sin límite', () => {
+    const sesion = nueva()
+    const inicio = sesion.obtenerEstado()
+
+    jugar(sesion, 'e2 e4', 'e7 e5', 'g1 f3', 'b8 c6')
+    for (let i = 0; i < 4; i++) sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toEqual(inicio)
+  })
+
+  it('sin Jugadas no hace nada ni avisa', () => {
+    const sesion = nueva()
+    const antes = sesion.obtenerEstado()
+    let avisos = 0
+    sesion.suscribir(() => avisos++)
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toBe(antes)
+    expect(avisos).toBe(0)
+  })
+
+  it('funciona en una Partida restaurada', () => {
+    const sesion = nueva('1. e4 d5 2. exd5')
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado().historial).toEqual(['e4', 'd5'])
+    expect(piezaEn(sesion.obtenerEstado(), 'd5')).toEqual({ casilla: 'd5', tipo: 'p', bando: 'b' })
+  })
+
+  it('devuelve la pieza capturada y la quita de las capturadas', () => {
+    const sesion = nueva('1. e4 d5 2. exd5')
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado().capturadas).toEqual({ w: [], b: [] })
+  })
+
+  it('devuelve rey y torre tras el enroque, y se puede volver a enrocar', () => {
+    const sesion = nueva('1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O')
+
+    sesion.deshacer()
+    sesion.tocarCasilla('e1')
+
+    const estado = sesion.obtenerEstado()
+    expect(piezaEn(estado, 'e1')?.tipo).toBe('k')
+    expect(piezaEn(estado, 'h1')?.tipo).toBe('r')
+    expect(piezaEn(estado, 'f1')).toBeUndefined()
+    expect(destinos(estado)).toContain('g1')
+  })
+
+  it('devuelve el peón capturado al paso a su casilla real, y se puede repetir la captura', () => {
+    const sesion = nueva('1. e4 d5 2. e5 f5 3. exf6')
+
+    sesion.deshacer()
+    sesion.tocarCasilla('e5')
+
+    const estado = sesion.obtenerEstado()
+    expect(piezaEn(estado, 'f5')).toEqual({ casilla: 'f5', tipo: 'p', bando: 'b' })
+    expect(piezaEn(estado, 'f6')).toBeUndefined()
+    expect(estado.capturadas).toEqual({ w: [], b: [] })
+    expect(estado.destinos).toContainEqual({ casilla: 'f6', captura: true })
+  })
+
+  it('devuelve el peón tras la Coronación', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    sesion.coronar('q')
+    sesion.deshacer()
+
+    const estado = sesion.obtenerEstado()
+    expect(piezaEn(estado, 'a7')).toEqual({ casilla: 'a7', tipo: 'p', bando: 'w' })
+    expect(piezaEn(estado, 'a8')).toBeUndefined()
+    expect(estado.historial).toEqual([])
+  })
+
+  it('quita la selección', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    sesion.tocarCasilla('e7')
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado().seleccion).toBeNull()
+    expect(sesion.obtenerEstado().destinos).toEqual([])
+  })
+
+  it('cancela la Coronación pendiente y retira la Jugada anterior', () => {
+    const sesion = nueva('1. a4 b5 2. axb5 a6 3. bxa6 Bb7 4. axb7 Nc6')
+
+    jugar(sesion, 'b7 a8')
+    sesion.deshacer()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado.coronacion).toBeNull()
+    expect(estado.turno).toBe('b')
+    expect(estado.historial).toHaveLength(7)
+  })
+
+  it('tras un jaque mate quita el Resultado y devuelve el turno', () => {
+    const sesion = nueva('1. f3 e5 2. g4 Qh4#')
+
+    sesion.deshacer()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado.resultado).toBeNull()
+    expect(estado.jaque).toBe(false)
+    expect(estado.turno).toBe('b')
+  })
+
+  it('tras una triple repetición quita las tablas, y repetir la Jugada las devuelve', () => {
+    const sesion = nueva()
+    const resultado = { tipo: 'tablas', motivo: 'triple-repeticion' }
+
+    jugar(sesion, 'g1 f3', 'g8 f6', 'f3 g1', 'f6 g8', 'g1 f3', 'g8 f6', 'f3 g1', 'f6 g8')
+    sesion.deshacer()
+    expect(sesion.obtenerEstado().resultado).toBeNull()
+
+    jugar(sesion, 'f6 g8')
+    expect(sesion.obtenerEstado().resultado).toEqual(resultado)
+  })
+})
+
+describe('Girar', () => {
+  it('el tablero empieza sin girar', () => {
+    expect(nueva().obtenerEstado().girado).toBe(false)
+  })
+
+  it('girar cambia la orientación y volver a girar la restaura', () => {
+    const sesion = nueva()
+
+    sesion.girar()
+    expect(sesion.obtenerEstado().girado).toBe(true)
+
+    sesion.girar()
+    expect(sesion.obtenerEstado().girado).toBe(false)
+  })
+
+  it('no gira solo al jugar ni al Deshacer', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    expect(sesion.obtenerEstado().girado).toBe(false)
+
+    sesion.girar()
+    jugar(sesion, 'e7 e5')
+    sesion.deshacer()
+    expect(sesion.obtenerEstado().girado).toBe(true)
+  })
+
+  it('conserva la selección', () => {
+    const sesion = nueva()
+
+    sesion.tocarCasilla('g1')
+    sesion.girar()
+
+    expect(sesion.obtenerEstado().seleccion).toBe('g1')
+    expect(destinos(sesion.obtenerEstado())).toEqual(['f3', 'h3'])
+  })
+
+  it('conserva la Coronación pendiente', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    sesion.girar()
+
+    expect(sesion.obtenerEstado().coronacion).toEqual({ desde: 'a7', hasta: 'a8' })
+  })
+
+  it('se puede girar con la Partida terminada', () => {
+    const sesion = nueva('1. f3 e5 2. g4 Qh4#')
+
+    sesion.girar()
+
+    expect(sesion.obtenerEstado().girado).toBe(true)
   })
 })
 

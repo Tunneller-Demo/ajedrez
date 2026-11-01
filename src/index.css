@@ -14,6 +14,16 @@
   --font-cormorant: 'Cormorant Garamond', serif;
 }
 
+@custom-variant lateral {
+  @media (min-width: 860px) {
+    @slot;
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    @slot;
+  }
+}
+@custom-variant compacta (@media (orientation: landscape) and (max-height: 500px));
+
 @layer base {
   body {
     background: var(--color-noche);
@@ -38,6 +48,50 @@
     transparent 70%
   );
   transition: --foco-y 0.9s ease-in-out;
+
+  @variant lateral {
+    background: radial-gradient(
+      ellipse 50% 60% at 34% var(--foco-y),
+      color-mix(in srgb, var(--color-foco) 38%, transparent),
+      transparent 72%
+    );
+  }
+}
+
+/* --lado es el del tablero. En vertical descuenta título, turno, franjas, Historial y acciones. */
+.pantalla {
+  --franja: 1.5rem;
+  --lado: min(100vw, 100svh - 16rem);
+  position: relative;
+  display: grid;
+  grid-template: 'titulo' 'turno' 'escena' 'historial' 'acciones' / minmax(0, 1fr);
+  align-content: center;
+  gap: 0.25rem;
+  min-height: 100svh;
+  padding-block: 0.25rem;
+
+  @variant lateral {
+    --lado: min(100vw - 24rem, 100svh - 2 * var(--franja) - 2rem);
+    --alto: calc(var(--lado) + 2 * var(--franja));
+    grid-template:
+      'escena titulo' auto
+      'escena turno' auto
+      'escena historial' minmax(0, 1fr)
+      'escena acciones' auto
+      / auto minmax(0, 21rem);
+    justify-content: center;
+    gap: 0.5rem 2.5rem;
+    height: var(--alto);
+    min-height: 0;
+    padding-block: 0;
+    margin-block: calc((100svh - var(--alto)) / 2);
+  }
+
+  @variant compacta {
+    --franja: 1.125rem;
+    --lado: min(100vw - 14rem, 100svh - 2 * var(--franja) - 0.5rem);
+    column-gap: 1rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

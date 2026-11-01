@@ -21,6 +21,9 @@ export type EstadoDePartida = {
   coronacion: Coronacion | null
   ultimaJugada: UltimaJugada | null
   resultado: Resultado | null
+  historial: string[]
+  capturadas: Record<Bando, PieceSymbol[]>
+  girado: boolean
 }
 
 export type EventoDeJugada = {
@@ -43,10 +46,16 @@ export type Dependencias = { almacen: Almacen; reloj: Reloj }
 export type SesionDePartida = {
   tocarCasilla(casilla: Square): void
   coronar(pieza: PieceSymbol): void
+  deshacer(): void
+  girar(): void
   obtenerEstado(): EstadoDePartida
   suscribir(oyente: () => void): () => void
   alJugar(oyente: (evento: EventoDeJugada) => void): () => void
 }
+
+const FIGURITAS: Record<string, string> = { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞' }
+
+const conFiguritas = (san: string) => san.replace(/[KQRBN]/g, (letra) => FIGURITAS[letra])
 
 // El jaque mate va primero: en la media jugada 100 también cuenta como tablas.
 function calcularResultado(chess: Chess): Resultado | null {
@@ -76,6 +85,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
 
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
+  let girado = false
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
 
@@ -86,7 +96,10 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
         destinos.set(jugada.to, { casilla: jugada.to, captura: Boolean(jugada.captured) })
       }
     }
-    const ultima = chess.history({ verbose: true }).pop()
+    const jugadas = chess.history({ verbose: true })
+    const ultima = jugadas[jugadas.length - 1]
+    const capturadas: Record<Bando, PieceSymbol[]> = { w: [], b: [] }
+    for (const { color, captured } of jugadas) if (captured) capturadas[color].push(captured)
     return {
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
@@ -96,6 +109,9 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
       coronacion,
       ultimaJugada: ultima ? { desde: ultima.from, hasta: ultima.to } : null,
       resultado: calcularResultado(chess),
+      historial: jugadas.map(({ san }) => conFiguritas(san)),
+      capturadas,
+      girado,
     }
   }
 
@@ -144,9 +160,20 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
     if (jugada) jugar(jugada)
   }
 
+  function deshacer() {
+    if (chess.undo()) publicar(null, null)
+  }
+
+  function girar() {
+    girado = !girado
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
   return {
     tocarCasilla,
     coronar,
+    deshacer,
+    girar,
     obtenerEstado: () => estado,
     suscribir(oyente) {
       oyentes.add(oyente)

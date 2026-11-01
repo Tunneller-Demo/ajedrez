@@ -1,9 +1,10 @@
-import { useSyncExternalStore, type CSSProperties } from 'react'
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from 'react'
 import type { PieceSymbol, Square } from 'chess.js'
 import type { Bando, EstadoDePartida, Pieza, SesionDePartida } from './sesion/sesionDePartida'
 
 const COLUMNAS = 'abcdefgh'
 const CASILLAS = [8, 7, 6, 5, 4, 3, 2, 1].flatMap((fila) => [...COLUMNAS].map((columna) => `${columna}${fila}` as Square))
+const CASILLAS_GIRADAS = [...CASILLAS].reverse()
 
 const NOMBRES: Record<PieceSymbol, { nombre: string; femenino: boolean }> = {
   k: { nombre: 'rey', femenino: false },
@@ -26,7 +27,7 @@ const nombreDelBando = (bando: Bando) => (bando === 'w' ? 'blancas' : 'negras')
 const urlDePieza = (bando: Bando, tipo: PieceSymbol) =>
   `${import.meta.env.BASE_URL}piezas/gala/${bando}${tipo.toUpperCase()}.svg`
 
-function nombreDePieza({ tipo, bando }: Pieza) {
+function nombreDePieza({ tipo, bando }: Omit<Pieza, 'casilla'>) {
   const { nombre, femenino } = NOMBRES[tipo]
   const adjetivo = bando === 'w' ? (femenino ? 'blanca' : 'blanco') : femenino ? 'negra' : 'negro'
   return `${nombre} ${adjetivo}`
@@ -84,8 +85,12 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
           className="absolute inset-0 size-full select-none"
         />
       )}
-      {casilla[0] === 'a' && <span aria-hidden className={`${COORDENADA} top-[4%] left-[5%]`}>{casilla[1]}</span>}
-      {casilla[1] === '1' && <span aria-hidden className={`${COORDENADA} right-[6%] bottom-[4%]`}>{casilla[0]}</span>}
+      {casilla[0] === (estado.girado ? 'h' : 'a') && (
+        <span aria-hidden className={`${COORDENADA} top-[4%] left-[5%]`}>{casilla[1]}</span>
+      )}
+      {casilla[1] === (estado.girado ? '8' : '1') && (
+        <span aria-hidden className={`${COORDENADA} right-[6%] bottom-[4%]`}>{casilla[0]}</span>
+      )}
       {destino && (
         <span
           aria-hidden
@@ -100,42 +105,111 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
   )
 }
 
+function Capturadas({ bando, estado }: { bando: Bando; estado: EstadoDePartida }) {
+  const rival = bando === 'w' ? 'b' : 'w'
+
+  return (
+    <ul
+      aria-label={`Capturadas por las ${nombreDelBando(bando)}`}
+      className="flex h-(--franja) items-center px-2"
+    >
+      {estado.capturadas[bando].map((tipo, indice) => (
+        <li key={indice} className="-mr-[0.4rem] shrink-0">
+          <img src={urlDePieza(rival, tipo)} alt={nombreDePieza({ tipo, bando: rival })} className="size-(--franja)" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Historial({ historial }: { historial: string[] }) {
+  const lista = useRef<HTMLOListElement>(null)
+  const pares = Array.from({ length: Math.ceil(historial.length / 2) }, (_, i) => historial.slice(i * 2, i * 2 + 2))
+
+  useEffect(() => {
+    lista.current?.scrollTo({ top: lista.current.scrollHeight, left: lista.current.scrollWidth })
+  }, [historial.length])
+
+  return (
+    <ol
+      ref={lista}
+      aria-label="Historial"
+      tabIndex={0}
+      className="flex min-h-8 w-full gap-3.5 overflow-x-auto px-3 py-0.5 text-lg whitespace-nowrap [grid-area:historial] lateral:block lateral:overflow-x-hidden lateral:overflow-y-auto lateral:px-0 lateral:text-xl lateral:whitespace-normal compacta:text-lg"
+    >
+      {pares.map(([blancas, negras], indice) => (
+        <li
+          key={indice}
+          className="flex gap-1.5 lateral:grid lateral:grid-cols-[2.1rem_1fr_1fr] lateral:gap-0 lateral:border-b lateral:border-oro/15 lateral:py-0.5"
+        >
+          <span className="text-oro">{indice + 1}</span>
+          <span>{blancas}</span>
+          <span>{negras}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+const ACCION =
+  'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase enabled:hover:text-marfil disabled:cursor-default disabled:opacity-40 lateral:h-9 compacta:h-11'
+
 export function App({ sesion }: { sesion: SesionDePartida }) {
   const estado = useSyncExternalStore(sesion.suscribir, sesion.obtenerEstado)
+  const [arriba, abajo]: Bando[] = estado.girado ? ['w', 'b'] : ['b', 'w']
+  const luzAbajo = estado.turno === abajo
 
   return (
     <>
-      <div aria-hidden className="foco" style={{ '--foco-y': estado.turno === 'w' ? '82%' : '18%' } as CSSProperties} />
-      <main className="relative mx-auto flex min-h-svh w-full max-w-[min(100vw,calc(100svh-9rem))] flex-col gap-2 py-2">
-        <h1 className="px-2 text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase">
+      <div aria-hidden className="foco" style={{ '--foco-y': luzAbajo ? '82%' : '18%' } as CSSProperties} />
+      <main className="pantalla">
+        <h1 className="text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase [grid-area:titulo] lateral:text-left compacta:sr-only">
           Ajedrez de Gala
         </h1>
-        <p className="px-2 text-center text-3xl leading-tight italic">{textoDelTurno(estado)}</p>
+        <p className="px-2 text-center text-3xl leading-tight italic [grid-area:turno] lateral:border-b lateral:border-oro/40 lateral:px-0 lateral:pb-4 lateral:text-left lateral:text-5xl compacta:pb-1 compacta:text-2xl">
+          {textoDelTurno(estado)}
+        </p>
         <span id="ultima-jugada" hidden>
           Última Jugada
         </span>
-        <div className="relative grid grid-cols-8 shadow-[0_0_70px_rgb(0_0_0/0.8)] ring-1 ring-oro/65">
-          {CASILLAS.map((casilla) => (
-            <Casilla key={casilla} casilla={casilla} estado={estado} sesion={sesion} />
-          ))}
-          {estado.coronacion && (
-            <div
-              role="group"
-              aria-label="Elige la pieza de la Coronación"
-              className="absolute inset-x-0 inset-y-[37.5%] z-10 flex justify-center border-y border-oro bg-noche/95"
-            >
-              {CORONACIONES.map(({ tipo, etiqueta }) => (
-                <button
-                  key={tipo}
-                  aria-label={etiqueta}
-                  onClick={() => sesion.coronar(tipo)}
-                  className="aspect-square h-full cursor-pointer touch-manipulation"
-                >
-                  <img src={urlDePieza(estado.turno, tipo)} alt="" className="size-full" />
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="mx-auto w-(--lado) [grid-area:escena]">
+          <Capturadas bando={arriba} estado={estado} />
+          <div className="relative grid grid-cols-8 shadow-[0_0_70px_rgb(0_0_0/0.8)] ring-1 ring-oro/65">
+            {(estado.girado ? CASILLAS_GIRADAS : CASILLAS).map((casilla) => (
+              <Casilla key={casilla} casilla={casilla} estado={estado} sesion={sesion} />
+            ))}
+            {estado.coronacion && (
+              <div
+                role="group"
+                aria-label="Elige la pieza de la Coronación"
+                className="absolute inset-x-0 inset-y-[37.5%] z-10 flex justify-center border-y border-oro bg-noche/95"
+              >
+                {CORONACIONES.map(({ tipo, etiqueta }) => (
+                  <button
+                    key={tipo}
+                    aria-label={etiqueta}
+                    onClick={() => sesion.coronar(tipo)}
+                    className="aspect-square h-full cursor-pointer touch-manipulation"
+                  >
+                    <img src={urlDePieza(estado.turno, tipo)} alt="" className="size-full" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Capturadas bando={abajo} estado={estado} />
+        </div>
+        <Historial historial={estado.historial} />
+        <div className="flex w-full gap-1 px-1 [grid-area:acciones] lateral:px-0">
+          <button onClick={sesion.deshacer} disabled={!estado.historial.length} className={ACCION}>
+            Deshacer
+          </button>
+          <button onClick={sesion.girar} className={ACCION}>
+            Girar
+          </button>
+          <button disabled className={ACCION}>
+            Nueva partida
+          </button>
         </div>
       </main>
     </>

@@ -13,5 +13,6 @@ export default defineConfig({
   projects: [
     { name: 'escritorio', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'movil', use: { ...devices['Pixel 7'], viewport: { width: 390, height: 844 } } },
+    { name: 'horizontal', use: { ...devices['Pixel 7 landscape'], viewport: { width: 844, height: 390 } } },
   ],
 })
