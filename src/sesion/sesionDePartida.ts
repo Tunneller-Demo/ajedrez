@@ -1,5 +1,6 @@
 // Sesión de Partida: dueña de la lógica, sin React ni navegador. La interfaz solo envía acciones y lee estado y eventos.
 import { Chess, type Color, type Move, type PieceSymbol, type Square } from 'chess.js'
+import { guardarPartida, restaurarPartida } from './guardado'
 
 export type Bando = Color
 export type Pieza = { casilla: Square; tipo: PieceSymbol; bando: Bando }
@@ -85,9 +86,8 @@ function torreDelEnroque(jugada: Move) {
   return null
 }
 
-export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string): SesionDePartida {
-  const chess = new Chess()
-  if (pgn) chess.loadPgn(pgn)
+export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida {
+  const chess = restaurarPartida(almacen)
 
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
@@ -135,6 +135,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
 
   function jugar({ from, to, promotion }: Move) {
     const jugada = chess.move({ from, to, promotion })
+    guardarPartida(almacen, chess)
     publicar(null, null)
     const evento: EventoDeJugada = {
       bando: jugada.color,
@@ -173,6 +174,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
 
   function deshacer() {
     if (!chess.undo()) return
+    guardarPartida(almacen, chess)
     finalCerrado = false
     publicar(null, null)
   }
@@ -184,6 +186,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
 
   function empezar() {
     chess.reset()
+    guardarPartida(almacen, chess)
     girado = false
     finalCerrado = false
     eleccionAbierta = false

@@ -122,6 +122,29 @@ test.describe('Partida a dos bajo la ruta base', () => {
     await expect(casilla(page, 'g4')).toHaveAccessibleName('g4, peón blanco')
   })
 
+  test('recargar a mitad de Partida conserva la posición y el Historial', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+    const historial = page.getByRole('list', { name: 'Historial' })
+
+    await jugar('e2 e4', 'd7 d5', 'g1 f3')
+    await page.reload()
+
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+    await expect(casilla(page, 'f3')).toHaveAccessibleName('f3, caballo blanco')
+    await expect(casilla(page, 'g1')).toHaveAccessibleName('g1')
+    await expect(historial.getByText('♞f3')).toBeVisible()
+    await expect(historial.getByRole('listitem')).toHaveCount(2)
+    await expect(boton(page, 'Deshacer')).toBeEnabled()
+  })
+
+  test('recargar con la Partida terminada abre la pantalla final', async ({ page, isMobile }) => {
+    await tocador(page, isMobile).jugar(...mateDelLoco)
+    await page.reload()
+
+    await expect(capa(page).getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+    await expect(capa(page).getByText('ganan las negras')).toBeVisible()
+  })
+
   test('Escape cierra la pantalla final como «Ver la partida»', async ({ page, isMobile }) => {
     await tocador(page, isMobile).jugar(...mateDelLoco)
     await expect(capa(page)).toBeVisible()

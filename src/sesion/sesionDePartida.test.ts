@@ -2,18 +2,22 @@ import { describe, expect, it } from 'vitest'
 import type { Square } from 'chess.js'
 import {
   crearSesionDePartida,
-  type Dependencias,
+  type Almacen,
   type EstadoDePartida,
   type EventoDeJugada,
   type SesionDePartida,
 } from './sesionDePartida'
 
-const dobles = (): Dependencias => ({
-  almacen: { leer: () => null, escribir: () => {} },
-  reloj: { ahora: () => 0 },
-})
+const conAlmacen = (almacen: Almacen) => crearSesionDePartida({ almacen, reloj: { ahora: () => 0 } })
 
-const nueva = (pgn?: string) => crearSesionDePartida(dobles(), pgn)
+const conGuardado = (guardado: string | null) => conAlmacen({ leer: () => guardado, escribir: () => {} })
+
+const nueva = (pgn?: string) => conGuardado(pgn ? JSON.stringify({ pgn }) : null)
+
+function almacenEnMemoria(): Almacen {
+  const datos = new Map<string, string>()
+  return { leer: (clave) => datos.get(clave) ?? null, escribir: (clave, valor) => void datos.set(clave, valor) }
+}
 
 const desdeFen = (fen: string) => nueva(`[SetUp "1"]\n[FEN "${fen}"]\n\n*`)
 
@@ -833,6 +837,116 @@ describe('«Nueva partida»', () => {
     sesion.empezar()
 
     expect(sesion.obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+})
+
+describe('Guardado', () => {
+  it('recuperar conserva la posición, el turno y el Historial', () => {
+    const almacen = almacenEnMemoria()
+
+    jugar(conAlmacen(almacen), 'e2 e4', 'd7 d5', 'e4 d5')
+
+    const estado = conAlmacen(almacen).obtenerEstado()
+    expect(estado.historial).toEqual(['e4', 'd5', 'exd5'])
+    expect(estado.turno).toBe('b')
+    expect(piezaEn(estado, 'd5')).toEqual({ casilla: 'd5', tipo: 'p', bando: 'w' })
+    expect(estado.capturadas).toEqual({ w: ['p'], b: [] })
+  })
+
+  it('recuperar conserva la triple repetición', () => {
+    const almacen = almacenEnMemoria()
+
+    jugar(conAlmacen(almacen), 'g1 f3', 'g8 f6', 'f3 g1', 'f6 g8', 'g1 f3', 'g8 f6', 'f3 g1')
+
+    const sesion = conAlmacen(almacen)
+    expect(sesion.obtenerEstado().resultado).toBeNull()
+
+    jugar(sesion, 'f6 g8')
+
+    expect(sesion.obtenerEstado().resultado).toEqual({ tipo: 'tablas', motivo: 'triple-repeticion' })
+  })
+
+  it('recuperar permite Deshacer hasta el inicio', () => {
+    const almacen = almacenEnMemoria()
+
+    jugar(conAlmacen(almacen), 'e2 e4', 'e7 e5', 'g1 f3', 'b8 c6')
+
+    const sesion = conAlmacen(almacen)
+    for (let i = 0; i < 4; i++) sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+
+  it('Deshacer también se guarda', () => {
+    const almacen = almacenEnMemoria()
+    const sesion = conAlmacen(almacen)
+
+    jugar(sesion, 'e2 e4', 'e7 e5')
+    sesion.deshacer()
+
+    expect(conAlmacen(almacen).obtenerEstado().historial).toEqual(['e4'])
+  })
+
+  it('empezar reemplaza la Partida guardada', () => {
+    const almacen = almacenEnMemoria()
+    const sesion = conAlmacen(almacen)
+
+    jugar(sesion, 'e2 e4')
+    sesion.empezar()
+
+    expect(conAlmacen(almacen).obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+
+  it('una Partida recuperada se sigue guardando', () => {
+    const almacen = almacenEnMemoria()
+
+    jugar(conAlmacen(almacen), 'e2 e4')
+    jugar(conAlmacen(almacen), 'e7 e5')
+
+    expect(conAlmacen(almacen).obtenerEstado().historial).toEqual(['e4', 'e5'])
+  })
+
+  it('recuperar una Partida terminada abre su pantalla final', () => {
+    const almacen = almacenEnMemoria()
+    const terminada = conAlmacen(almacen)
+
+    jugar(terminada, 'f2 f3', 'e7 e5', 'g2 g4', 'd8 h4')
+    terminada.verLaPartida()
+
+    expect(conAlmacen(almacen).obtenerEstado()).toMatchObject({
+      pantallaFinal: true,
+      resultado: { tipo: 'jaque-mate', ganador: 'b' },
+    })
+  })
+
+  it('reserva el lugar de Rival, Bando y Nivel', () => {
+    const escrituras: string[] = []
+    const sesion = conAlmacen({ leer: () => null, escribir: (_clave, valor) => void escrituras.push(valor) })
+
+    jugar(sesion, 'e2 e4')
+
+    expect(JSON.parse(escrituras[0])).toMatchObject({ rival: 'dos-personas', bando: null, nivel: null })
+  })
+
+  it.each([
+    ['con JSON roto', '{"pgn":'],
+    ['sin PGN', '{}'],
+    ['que no es un objeto', 'null'],
+    ['con un PGN ilegible', JSON.stringify({ pgn: '{' })],
+    ['con una Jugada ilegal tras otras válidas', JSON.stringify({ pgn: '1. e4 e5 2. e4' })],
+  ])('un guardado %s lleva al arranque normal', (_caso, guardado) => {
+    expect(conGuardado(guardado).obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+
+  it('un almacén que falla no interrumpe la Partida', () => {
+    const fallar = () => {
+      throw new Error('almacén no disponible')
+    }
+    const sesion = conAlmacen({ leer: fallar, escribir: fallar })
+
+    jugar(sesion, 'e2 e4')
+
+    expect(sesion.obtenerEstado().historial).toEqual(['e4'])
   })
 })
 
