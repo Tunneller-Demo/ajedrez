@@ -2,11 +2,13 @@
 import { Chess } from 'chess.js'
 import type { Almacen } from './sesionDePartida'
 
+// Rival, Bando y Nivel solo reservan su lugar hasta que llegue la Máquina.
+type Guardado = { pgn: string; rival: 'persona'; bando: null; nivel: null }
+
 const CLAVE_DE_PARTIDA = 'ajedrez-de-gala:partida'
 
-// Rival, Bando y Nivel solo reservan su lugar hasta que llegue la Máquina.
 export function guardarPartida(almacen: Almacen, chess: Chess) {
-  const guardado = { pgn: chess.pgn(), rival: 'dos-personas', bando: null, nivel: null }
+  const guardado: Guardado = { pgn: chess.pgn(), rival: 'persona', bando: null, nivel: null }
   try {
     almacen.escribir(CLAVE_DE_PARTIDA, JSON.stringify(guardado))
   } catch {
@@ -18,8 +20,8 @@ export function guardarPartida(almacen: Almacen, chess: Chess) {
 export function restaurarPartida(almacen: Almacen) {
   const chess = new Chess()
   try {
-    const guardado = almacen.leer(CLAVE_DE_PARTIDA)
-    if (guardado) chess.loadPgn(JSON.parse(guardado).pgn)
+    const texto = almacen.leer(CLAVE_DE_PARTIDA)
+    if (texto) chess.loadPgn((JSON.parse(texto) as Guardado).pgn)
   } catch {
     chess.reset()
   }

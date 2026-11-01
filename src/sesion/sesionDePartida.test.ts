@@ -925,7 +925,7 @@ describe('Guardado', () => {
 
     jugar(sesion, 'e2 e4')
 
-    expect(JSON.parse(escrituras[0])).toMatchObject({ rival: 'dos-personas', bando: null, nivel: null })
+    expect(JSON.parse(escrituras[0])).toMatchObject({ rival: 'persona', bando: null, nivel: null })
   })
 
   it.each([
