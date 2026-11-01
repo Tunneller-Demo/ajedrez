@@ -2,9 +2,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const casilla = (page: Page, nombre: string) => page.getByRole('button', { name: new RegExp(`^${nombre}(,|$)`) })
 
-test.describe('Partida a dos bajo /ajedrez/', () => {
+test.describe('Partida a dos bajo la ruta base', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/ajedrez/')
+    await page.goto('.')
   })
 
   function tocador(page: Page, isMobile: boolean) {
@@ -20,6 +20,15 @@ test.describe('Partida a dos bajo /ajedrez/', () => {
       },
     }
   }
+
+  test('carga sus assets desde la ruta base', async ({ page, baseURL }) => {
+    const assets = await page
+      .locator('script[src], link[rel="stylesheet"]')
+      .evaluateAll((nodos) => nodos.map((nodo) => (nodo as HTMLScriptElement).src || (nodo as HTMLLinkElement).href))
+
+    expect(assets.length).toBeGreaterThan(0)
+    for (const asset of assets) expect(asset).toContain(baseURL)
+  })
 
   test('arranca en la posición inicial con el turno de blancas', async ({ page }) => {
     await expect(page.getByText('Turno de las blancas')).toBeVisible()

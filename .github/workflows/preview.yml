@@ -1,0 +1,59 @@
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+concurrency: preview-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  pages: read
+
+jobs:
+  publicar:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    env:
+      BASE_PATH: /ajedrez/pr-preview/pr-${{ github.event.number }}/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Playwright compila la app: dist sale de aquí y solo se publica si todo pasa.
+      - run: npm test
+      - uses: rossjrw/pr-preview-action@873417d2df72380da1f3978378fb58560bcde976 # v1.8.2
+        with:
+          source-dir: dist
+      - name: Lee de dónde sirve Pages
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fuente=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.source.branch + .source.path' 2>/dev/null) || fuente=""
+          echo "fuente=$fuente" >> "$GITHUB_OUTPUT"
+      - name: Pide configurar Pages
+        if: steps.pages.outputs.fuente != 'gh-pages/'
+        uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db # v2.9.2
+        with:
+          header: ajustes-pages
+          message: |
+            ⚠️ El link de preview no funcionará hasta configurar GitHub Pages: en **Settings → Pages** elige «Deploy from branch», rama `gh-pages`, raíz (`/`).
+      - name: Retira el aviso de Pages
+        if: steps.pages.outputs.fuente == 'gh-pages/'
+        uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db # v2.9.2
+        with:
+          header: ajustes-pages
+          delete: true
+
+  retirar:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rossjrw/pr-preview-action@873417d2df72380da1f3978378fb58560bcde976 # v1.8.2

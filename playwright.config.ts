@@ -1,11 +1,13 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const url = `http://localhost:4173${process.env.BASE_PATH ?? '/ajedrez/'}`
+
 export default defineConfig({
   testDir: 'e2e',
-  use: { baseURL: 'http://localhost:4173' },
+  use: { baseURL: url },
   webServer: {
     command: 'npm run build && npm run preview',
-    url: 'http://localhost:4173/ajedrez/',
+    url,
     reuseExistingServer: false,
   },
   projects: [

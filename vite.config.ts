@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/ajedrez/',
+  base: process.env.BASE_PATH ?? '/ajedrez/',
   build: { target: 'es2020' },
   test: { environment: 'node', include: ['src/**/*.test.ts'] },
 })
