@@ -5,6 +5,7 @@ export type Bando = Color
 export type Pieza = { casilla: Square; tipo: PieceSymbol; bando: Bando }
 export type Destino = { casilla: Square; captura: boolean }
 export type Coronacion = { desde: Square; hasta: Square }
+export type UltimaJugada = { desde: Square; hasta: Square }
 
 export type Resultado =
   | { tipo: 'jaque-mate'; ganador: Bando }
@@ -18,6 +19,7 @@ export type EstadoDePartida = {
   seleccion: Square | null
   destinos: Destino[]
   coronacion: Coronacion | null
+  ultimaJugada: UltimaJugada | null
   resultado: Resultado | null
 }
 
@@ -84,6 +86,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
         destinos.set(jugada.to, { casilla: jugada.to, captura: Boolean(jugada.captured) })
       }
     }
+    const ultima = chess.history({ verbose: true }).pop()
     return {
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
@@ -91,6 +94,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
       seleccion,
       destinos: [...destinos.values()],
       coronacion,
+      ultimaJugada: ultima ? { desde: ultima.from, hasta: ultima.to } : null,
       resultado: calcularResultado(chess),
     }
   }

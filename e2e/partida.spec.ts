@@ -75,4 +75,65 @@ test.describe('Partida a dos bajo la ruta base', () => {
 
     await expect(page.getByText('Jaque mate: ganan las negras')).toBeVisible()
   })
+
+  test('la última Jugada queda marcada en su origen y su destino', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+    const marca = 'Última Jugada'
+
+    await jugar('e2 e4')
+    await expect(casilla(page, 'e2')).toHaveAccessibleDescription(marca)
+    await expect(casilla(page, 'e4')).toHaveAccessibleDescription(marca)
+
+    await jugar('g8 f6')
+    await expect(casilla(page, 'g8')).toHaveAccessibleDescription(marca)
+    await expect(casilla(page, 'f6')).toHaveAccessibleDescription(marca)
+    await expect(casilla(page, 'e2')).toHaveAccessibleDescription('')
+    await expect(casilla(page, 'e4')).toHaveAccessibleDescription('')
+  })
+
+  // Mide la franja inferior de la pantalla, siempre libre de tablero y de texto.
+  async function luzAbajo(page: Page) {
+    const captura = (await page.screenshot()).toString('base64')
+    return page.evaluate(async (datos) => {
+      const imagen = new Image()
+      imagen.src = `data:image/png;base64,${datos}`
+      await imagen.decode()
+      const lienzo = new OffscreenCanvas(imagen.width, imagen.height).getContext('2d')!
+      lienzo.drawImage(imagen, 0, 0)
+      const { data } = lienzo.getImageData(0, imagen.height - 8, imagen.width, 8)
+      return data.reduce((suma, canal) => suma + canal, 0) / data.length
+    }, captura)
+  }
+
+  test('el foco sigue al Bando en turno', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+    const conBlancas = await luzAbajo(page)
+
+    await jugar('e2 e4')
+    await expect.poll(() => luzAbajo(page)).toBeLessThan(conBlancas - 2)
+
+    await jugar('e7 e5')
+    await expect.poll(() => luzAbajo(page)).toBeGreaterThan(conBlancas - 1)
+  })
+})
+
+test('la escena se sirve entera desde la app, sin terceros', async ({ page, baseURL }) => {
+  const peticiones: string[] = []
+  page.on('request', (peticion) => peticiones.push(peticion.url()))
+
+  await page.goto('.')
+  await page.evaluate(() => document.fonts.ready)
+
+  const piezas = page.getByRole('main').locator('img')
+  await expect(piezas).toHaveCount(32)
+  await expect
+    .poll(() => piezas.evaluateAll((nodos) => nodos.every((nodo) => (nodo as HTMLImageElement).naturalWidth > 0)))
+    .toBe(true)
+
+  const tipografias = await page.evaluate(() =>
+    [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/"/g, '')),
+  )
+  expect(tipografias).toEqual(expect.arrayContaining(['Cinzel', 'Cormorant Garamond']))
+
+  for (const peticion of peticiones.filter((url) => !url.startsWith('data:'))) expect(peticion).toContain(baseURL)
 })

@@ -206,6 +206,43 @@ describe('al jugar', () => {
   })
 })
 
+describe('última Jugada', () => {
+  it('no hay ninguna al empezar', () => {
+    expect(nueva().obtenerEstado().ultimaJugada).toBeNull()
+  })
+
+  it('guarda el origen y el destino de la Jugada más reciente', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4', 'g8 f6')
+
+    expect(sesion.obtenerEstado().ultimaJugada).toEqual({ desde: 'g8', hasta: 'f6' })
+  })
+
+  it('se mantiene al seleccionar otra pieza', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    sesion.tocarCasilla('g8')
+
+    expect(sesion.obtenerEstado().ultimaJugada).toEqual({ desde: 'e2', hasta: 'e4' })
+  })
+
+  it('se recupera de una Partida restaurada', () => {
+    expect(nueva('1. e4 d5 2. exd5').obtenerEstado().ultimaJugada).toEqual({ desde: 'e4', hasta: 'd5' })
+  })
+
+  it('en la Coronación solo cambia al elegir la pieza', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    expect(sesion.obtenerEstado().ultimaJugada).toBeNull()
+
+    sesion.coronar('q')
+    expect(sesion.obtenerEstado().ultimaJugada).toEqual({ desde: 'a7', hasta: 'a8' })
+  })
+})
+
 describe('Jugadas especiales', () => {
   const enroques = '1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. d3 d6 5. Bd2 Bd7 6. Nc3 Qe7 7. Qe2'
 

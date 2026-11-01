@@ -1,1 +1,47 @@
 @import 'tailwindcss' source('.');
+
+@theme {
+  --color-noche: #0a0810;
+  --color-oro: #d8b25c;
+  --color-marfil: #f3e8cf;
+  --color-peligro: #ff5a5f;
+  --color-violeta: #4a3f60;
+  --color-violeta-hondo: #3a3050;
+  --color-ebano: #1e1829;
+  --color-ebano-hondo: #15101e;
+  --color-foco: #785caa;
+  --font-cinzel: 'Cinzel', serif;
+  --font-cormorant: 'Cormorant Garamond', serif;
+}
+
+@layer base {
+  body {
+    background: var(--color-noche);
+    color: var(--color-marfil);
+    font-family: var(--font-cormorant);
+  }
+}
+
+@property --foco-y {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 82%;
+}
+
+.foco {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 75% 60% at 50% var(--foco-y),
+    color-mix(in srgb, var(--color-foco) 34%, transparent),
+    transparent 70%
+  );
+  transition: --foco-y 0.9s ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foco {
+    transition: none;
+  }
+}
