@@ -558,6 +558,153 @@ test.describe('Partida a dos bajo la ruta base', () => {
   })
 })
 
+test.describe('sonido', () => {
+  // La prueba cuenta desde fuera lo que la app le pide a Web Audio; la app no sabe nada de esto.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      const audio = { contextos: 0, osciladores: 0 }
+      Object.assign(window, { audio })
+      const Original = window.AudioContext
+      window.AudioContext = class extends Original {
+        constructor(...argumentos: ConstructorParameters<typeof Original>) {
+          super(...argumentos)
+          audio.contextos++
+        }
+        createOscillator() {
+          audio.osciladores++
+          return super.createOscillator()
+        }
+      }
+    })
+    await page.goto('.')
+  })
+
+  const audio = (page: Page) =>
+    page.evaluate(() => (window as unknown as { audio: { contextos: number; osciladores: number } }).audio)
+  const silencio = (ambito: Page | Locator) => ambito.getByRole('button', { name: 'Silencio' })
+
+  test('no hay contexto de audio antes de la primera interacción', async ({ page }) => {
+    await expect(page.getByText('Turno de las blancas')).toBeVisible()
+    await page.evaluate(() => new Promise((listo) => setTimeout(listo, 200)))
+    expect((await audio(page)).contextos).toBe(0)
+
+    await casilla(page, 'e2').click()
+    await casilla(page, 'e4').click()
+
+    await expect.poll(async () => (await audio(page)).osciladores).toBeGreaterThan(0)
+    expect((await audio(page)).contextos).toBe(1)
+  })
+
+  for (const accion of ['Deshacer', 'Silencio']) {
+    test(`pulsar «${accion}» antes de que la pieza se pose evita el golpe`, async ({ page }) => {
+      await page.evaluate(async (accion) => {
+        const pulsar = (nombre: string) =>
+          [...document.querySelectorAll('button')]
+            .find((boton) => (boton.getAttribute('aria-label') ?? boton.textContent).startsWith(nombre))!
+            .click()
+        pulsar('e2')
+        pulsar('e4')
+        await new Promise(requestAnimationFrame)
+        pulsar(accion)
+      }, accion)
+
+      await page.waitForTimeout(700)
+      expect((await audio(page)).osciladores).toBe(0)
+    })
+  }
+
+  test('recuperar la Partida no suena', async ({ page }) => {
+    await casilla(page, 'e2').click()
+    await casilla(page, 'e4').click()
+    await page.reload()
+
+    await expect(casilla(page, 'e4')).toHaveAccessibleName('e4, peón blanco')
+    expect(await audio(page)).toEqual({ contextos: 0, osciladores: 0 })
+  })
+
+  test('con silencio una Jugada no suena, y se recuerda al recargar', async ({ page }) => {
+    await silencio(page).click()
+    await expect(silencio(page)).toHaveAttribute('aria-pressed', 'true')
+
+    await casilla(page, 'e2').click()
+    await casilla(page, 'e4').click()
+    await page.waitForTimeout(700)
+    expect((await audio(page)).osciladores).toBe(0)
+
+    await page.reload()
+    await expect(silencio(page)).toHaveAttribute('aria-pressed', 'true')
+
+    await silencio(page).click()
+    await casilla(page, 'e7').click()
+    await casilla(page, 'e5').click()
+    await expect.poll(async () => (await audio(page)).osciladores).toBeGreaterThan(0)
+  })
+
+  test('el silencio está arriba a la derecha y no tapa el título', async ({ page }) => {
+    const boton = (await silencio(page).boundingBox())!
+    const { width } = page.viewportSize()!
+
+    expect(boton.y).toBeLessThanOrEqual(8)
+    expect(boton.x + boton.width).toBeGreaterThanOrEqual(width - 8)
+    expect(boton.height).toBe(44)
+
+    const titulo = page.getByRole('heading', { name: 'Ajedrez de Gala' })
+    const bordeDerecho = await titulo.evaluate((nodo) => {
+      const rango = document.createRange()
+      rango.selectNodeContents(nodo)
+      return rango.getBoundingClientRect().right
+    })
+    expect(bordeDerecho).toBeLessThanOrEqual(boton.x)
+  })
+
+  test('el silencio no tapa el resultado más largo en un móvil en horizontal', async ({ page }) => {
+    const pgn = '[SetUp "1"]\n[FEN "k7/8/8/8/8/8/R7/K7 w - - 100 80"]\n\n*'
+    const guardado = JSON.stringify({ pgn, rival: 'persona', bando: null, nivel: null })
+    await page.evaluate((valor) => localStorage.setItem('ajedrez-de-gala:partida', valor), guardado)
+    await page.reload()
+    await page.getByRole('button', { name: 'Ver la partida' }).click()
+
+    const resultado = page.getByText('Tablas por la regla de las 50 jugadas')
+    for (const viewport of [{ width: 568, height: 320 }, { width: 667, height: 375 }]) {
+      await page.setViewportSize(viewport)
+      const boton = (await silencio(page).boundingBox())!
+      const lineas = await resultado.evaluate((nodo) => {
+        const rango = document.createRange()
+        rango.selectNodeContents(nodo)
+        return [...rango.getClientRects()].map(({ right, top }) => ({ right, top }))
+      })
+
+      for (const { right, top } of lineas) {
+        expect(right <= boton.x || top >= boton.y + boton.height).toBe(true)
+      }
+    }
+  })
+
+  test('el silencio funciona en la pantalla final y en «Nueva partida»', async ({ page }) => {
+    for (const jugada of ['f2 f3', 'e7 e5', 'g2 g4', 'd8 h4']) {
+      const [desde, hasta] = jugada.split(' ')
+      await casilla(page, desde).click()
+      await casilla(page, hasta).click()
+    }
+
+    const final = page.getByRole('dialog')
+    await expect(final.getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+    await expect(final.getByRole('button', { name: 'Jugar otra vez' })).toBeFocused()
+
+    await silencio(final).click()
+    await expect(silencio(final)).toHaveAttribute('aria-pressed', 'true')
+    await expect(final.getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+
+    await final.getByRole('button', { name: 'Ver la partida' }).click()
+    await page.getByRole('button', { name: 'Nueva partida' }).click()
+
+    const eleccion = page.getByRole('dialog')
+    await expect(silencio(eleccion)).toHaveAttribute('aria-pressed', 'true')
+    await silencio(eleccion).click()
+    await expect(silencio(eleccion)).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
 test('la escena se sirve entera desde la app, sin terceros', async ({ page, baseURL }) => {
   const peticiones: string[] = []
   page.on('request', (peticion) => peticiones.push(peticion.url()))

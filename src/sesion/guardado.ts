@@ -6,6 +6,7 @@ import type { Almacen } from './sesionDePartida'
 type Guardado = { pgn: string; rival: 'persona'; bando: null; nivel: null }
 
 const CLAVE_DE_PARTIDA = 'ajedrez-de-gala:partida'
+const CLAVE_DE_SILENCIO = 'ajedrez-de-gala:silencio'
 
 export function guardarPartida(almacen: Almacen, chess: Chess) {
   const guardado: Guardado = { pgn: chess.pgn(), rival: 'persona', bando: null, nivel: null }
@@ -26,4 +27,20 @@ export function restaurarPartida(almacen: Almacen) {
     chess.reset()
   }
   return chess
+}
+
+export function guardarSilencio(almacen: Almacen, silencio: boolean) {
+  try {
+    almacen.escribir(CLAVE_DE_SILENCIO, String(silencio))
+  } catch {
+    // Sin almacén el silencio dura lo que la página.
+  }
+}
+
+export function restaurarSilencio(almacen: Almacen) {
+  try {
+    return almacen.leer(CLAVE_DE_SILENCIO) === 'true'
+  } catch {
+    return false
+  }
 }

@@ -5,6 +5,7 @@ import '@fontsource/cormorant-garamond/latin-400.css'
 import '@fontsource/cormorant-garamond/latin-400-italic.css'
 import { App } from './App'
 import { crearSesionDePartida } from './sesion/sesionDePartida'
+import { conectarSonido } from './sonido/sonido'
 import './index.css'
 
 const sesion = crearSesionDePartida({
@@ -14,6 +15,8 @@ const sesion = crearSesionDePartida({
   },
   reloj: { ahora: () => Date.now() },
 })
+
+conectarSonido(sesion)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

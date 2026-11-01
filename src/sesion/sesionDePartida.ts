@@ -1,6 +1,6 @@
 // Sesión de Partida: dueña de la lógica, sin React ni navegador. La interfaz solo envía acciones y lee estado y eventos.
 import { Chess, type Color, type Move, type PieceSymbol, type Square } from 'chess.js'
-import { guardarPartida, restaurarPartida } from './guardado'
+import { guardarPartida, guardarSilencio, restaurarPartida, restaurarSilencio } from './guardado'
 
 export type Bando = Color
 export type Pieza = { casilla: Square; tipo: PieceSymbol; bando: Bando }
@@ -28,7 +28,10 @@ export type EstadoDePartida = {
   pantallaFinal: boolean
   eleccion: { aviso: boolean } | null
   jugadaEnEscena: EventoDeJugada | null
+  silencio: boolean
 }
+
+export type Efecto = 'fin' | 'jaque' | 'capturar' | 'mover'
 
 export type EventoDeJugada = {
   bando: Bando
@@ -42,6 +45,7 @@ export type EventoDeJugada = {
   jaque: boolean
   rayos: { desde: Square; hasta: Square }[]
   resultado: Resultado | null
+  efecto: Efecto
 }
 
 export type Almacen = { leer(clave: string): string | null; escribir(clave: string, valor: string): void }
@@ -58,6 +62,7 @@ export type SesionDePartida = {
   abrirEleccion(): void
   volverALaPartida(): void
   terminarAnimacion(): void
+  alternarSilencio(): void
   obtenerEstado(): EstadoDePartida
   suscribir(oyente: () => void): () => void
   alJugar(oyente: (evento: EventoDeJugada) => void): () => void
@@ -99,6 +104,12 @@ function rayosDelJaque(chess: Chess) {
   return chess.attackers(rey, bandoContrario(turno)).map((desde) => ({ desde, hasta: rey }))
 }
 
+function efectoDeJugada(resultado: Resultado | null, jaque: boolean, captura: boolean): Efecto {
+  if (resultado) return 'fin'
+  if (jaque) return 'jaque'
+  return captura ? 'capturar' : 'mover'
+}
+
 export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida {
   const chess = restaurarPartida(almacen)
 
@@ -108,6 +119,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   let finalCerrado = false
   let eleccionAbierta = false
   let jugadaEnEscena: EventoDeJugada | null = null
+  let silencio = restaurarSilencio(almacen)
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
 
@@ -138,6 +150,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       pantallaFinal: Boolean(resultado) && !finalCerrado && !jugadaEnEscena,
       eleccion: eleccionAbierta ? { aviso: jugadas.length > 0 && !resultado } : null,
       jugadaEnEscena,
+      silencio,
     }
   }
 
@@ -151,6 +164,8 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   function jugar({ from, to, promotion }: Move) {
     const jugada = chess.move({ from, to, promotion })
     guardarPartida(almacen, chess)
+    const jaque = chess.isCheck()
+    const resultado = calcularResultado(chess)
     const evento: EventoDeJugada = {
       bando: jugada.color,
       pieza: jugada.piece,
@@ -160,9 +175,10 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       captura: jugada.captured ? { pieza: jugada.captured, casilla: casillaCapturada(jugada) } : null,
       torre: torreDelEnroque(jugada),
       coronacion: jugada.promotion ?? null,
-      jaque: chess.isCheck(),
+      jaque,
       rayos: rayosDelJaque(chess),
-      resultado: calcularResultado(chess),
+      resultado,
+      efecto: efectoDeJugada(resultado, jaque, Boolean(jugada.captured)),
     }
     jugadaEnEscena = evento
     publicar(null, null)
@@ -233,6 +249,12 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     publicar(estado.seleccion, estado.coronacion)
   }
 
+  function alternarSilencio() {
+    silencio = !silencio
+    guardarSilencio(almacen, silencio)
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
   return {
     tocarCasilla,
     coronar,
@@ -243,6 +265,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     abrirEleccion,
     volverALaPartida,
     terminarAnimacion,
+    alternarSilencio,
     obtenerEstado: () => estado,
     suscribir(oyente) {
       oyentes.add(oyente)

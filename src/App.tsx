@@ -166,6 +166,25 @@ function Historial({ historial }: { historial: string[] }) {
 const ACCION =
   'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase enabled:hover:text-marfil disabled:cursor-default disabled:opacity-40 lateral:h-9 compacta:h-11'
 
+// Va al final del DOM de cada pantalla, para no robar el foco inicial de las capas.
+function BotonDeSilencio({ sesion }: { sesion: SesionDePartida }) {
+  const { silencio } = useSyncExternalStore(sesion.suscribir, sesion.obtenerEstado)
+
+  return (
+    <button
+      aria-label="Silencio"
+      aria-pressed={silencio}
+      onClick={sesion.alternarSilencio}
+      className="fixed top-0.5 right-0.5 z-20 grid size-11 cursor-pointer touch-manipulation place-items-center text-oro hover:text-marfil"
+    >
+      <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="size-6">
+        <path d="M3 9.5v5h3.5l5 4v-13l-5 4z" fill="currentColor" />
+        <path d={silencio ? 'm15.5 9.5 5 5m0-5-5 5' : 'M15 9a4.2 4.2 0 0 1 0 6m3-9a8.5 8.5 0 0 1 0 12'} />
+      </svg>
+    </button>
+  )
+}
+
 // El efecto de diseño cierra el dialog antes de desmontarlo, para que el foco vuelva a donde estaba.
 function Capa({
   titulo,
@@ -216,6 +235,7 @@ function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: Se
           Deshacer
         </button>
       </div>
+      <BotonDeSilencio sesion={sesion} />
     </Capa>
   )
 }
@@ -233,6 +253,7 @@ function EleccionDePartida({ aviso, sesion }: { aviso: boolean; sesion: SesionDe
           Volver a la partida
         </button>
       </div>
+      <BotonDeSilencio sesion={sesion} />
     </Capa>
   )
 }
@@ -253,7 +274,7 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         <h1 className="text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase [grid-area:titulo] lateral:text-left compacta:sr-only">
           Ajedrez de Gala
         </h1>
-        <p className="px-2 text-center text-3xl leading-tight italic [grid-area:turno] lateral:border-b lateral:border-oro/40 lateral:px-0 lateral:pb-4 lateral:text-left lateral:text-5xl compacta:pb-1 compacta:text-2xl">
+        <p className="px-2 text-center text-3xl leading-tight italic [grid-area:turno] lateral:border-b lateral:border-oro/40 lateral:px-0 lateral:pb-4 lateral:text-left lateral:text-5xl compacta:pr-12 compacta:pb-1 compacta:text-2xl">
           {textoDelTurno(estado)}
         </p>
         <span id="ultima-jugada" hidden>
@@ -306,6 +327,7 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
             Nueva partida
           </button>
         </div>
+        <BotonDeSilencio sesion={sesion} />
       </main>
       {estado.eleccion ? (
         <EleccionDePartida aviso={estado.eleccion.aviso} sesion={sesion} />

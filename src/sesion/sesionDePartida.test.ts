@@ -158,6 +158,7 @@ describe('al jugar', () => {
         jaque: false,
         rayos: [],
         resultado: null,
+        efecto: 'mover',
       },
     ])
   })
@@ -816,6 +817,98 @@ describe('Resultado', () => {
 
     expect(antes.resultado).toEqual({ tipo: 'jaque-mate', ganador: 'b' })
     expect(sesion.obtenerEstado()).toBe(antes)
+  })
+})
+
+describe('efecto de sonido', () => {
+  it.each([
+    ['mover', 'mover', nueva(), 'e2 e4'],
+    ['capturar', 'capturar', nueva('1. e4 d5'), 'e4 d5'],
+    ['jaque', 'jaque', desdeFen('4k3/8/8/8/8/8/8/R3K3 w - - 0 1'), 'a1 a8'],
+    ['jaque con captura', 'jaque', desdeFen('4k3/8/8/8/8/8/4p3/4R2K w - - 0 1'), 'e1 e2'],
+    ['jaque mate', 'fin', nueva('1. f3 e5 2. g4'), 'd8 h4'],
+    ['jaque mate con captura', 'fin', desdeFen('4n1k1/5ppp/8/8/8/8/8/4R2K w - - 0 1'), 'e1 e8'],
+    ['ahogado', 'fin', desdeFen('k7/8/1K6/8/8/8/8/2Q5 w - - 0 1'), 'c1 c7'],
+    ['tablas con captura', 'fin', desdeFen('k7/8/8/8/8/8/1p6/K7 w - - 0 1'), 'a1 b2'],
+  ] as const)('%s dispara %s', (_caso, efecto, sesion, jugada) => {
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, jugada)
+
+    expect(eventos.map((evento) => evento.efecto)).toEqual([efecto])
+  })
+})
+
+describe('silencio', () => {
+  it('empieza con el sonido activado', () => {
+    expect(nueva().obtenerEstado().silencio).toBe(false)
+  })
+
+  it('se alterna y avisa a la interfaz', () => {
+    const sesion = nueva()
+    let avisos = 0
+    sesion.suscribir(() => avisos++)
+
+    sesion.alternarSilencio()
+    expect(sesion.obtenerEstado().silencio).toBe(true)
+
+    sesion.alternarSilencio()
+    expect(sesion.obtenerEstado().silencio).toBe(false)
+    expect(avisos).toBe(2)
+  })
+
+  it('no toca la selección ni la Partida', () => {
+    const sesion = nueva()
+
+    sesion.tocarCasilla('e2')
+    sesion.alternarSilencio()
+
+    expect(sesion.obtenerEstado().seleccion).toBe('e2')
+    expect(destinos(sesion.obtenerEstado())).toEqual(['e3', 'e4'])
+  })
+
+  it('se puede alternar con la Partida terminada', () => {
+    const sesion = nueva(mate)
+
+    sesion.alternarSilencio()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ silencio: true, pantallaFinal: true })
+  })
+
+  it('se recuerda al recargar y sobrevive a una Partida nueva', () => {
+    const almacen = almacenEnMemoria()
+    const sesion = conAlmacen(almacen)
+
+    sesion.alternarSilencio()
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado().silencio).toBe(true)
+    expect(conAlmacen(almacen).obtenerEstado().silencio).toBe(true)
+  })
+
+  it('no pisa la Partida guardada', () => {
+    const almacen = almacenEnMemoria()
+    const sesion = conAlmacen(almacen)
+
+    jugar(sesion, 'e2 e4')
+    sesion.alternarSilencio()
+
+    expect(conAlmacen(almacen).obtenerEstado().historial).toEqual(['e4'])
+  })
+
+  it('una preferencia ilegible deja el sonido activado', () => {
+    expect(conGuardado('{"roto').obtenerEstado().silencio).toBe(false)
+  })
+
+  it('un almacén que falla no impide alternarlo', () => {
+    const fallar = () => {
+      throw new Error('almacén no disponible')
+    }
+    const sesion = conAlmacen({ leer: fallar, escribir: fallar })
+
+    sesion.alternarSilencio()
+
+    expect(sesion.obtenerEstado().silencio).toBe(true)
   })
 })
 
