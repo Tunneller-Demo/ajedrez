@@ -156,6 +156,7 @@ describe('al jugar', () => {
         torre: null,
         coronacion: null,
         jaque: false,
+        rayos: [],
         resultado: null,
       },
     ])
@@ -346,6 +347,130 @@ describe('Jugadas especiales', () => {
     expect(piezaEn(estado, 'f6')).toEqual({ casilla: 'f6', tipo: 'p', bando: 'w' })
     expect(piezaEn(estado, 'f5')).toBeUndefined()
     expect(eventos[0].captura).toEqual({ pieza: 'p', casilla: 'f5' })
+  })
+})
+
+describe('rayos del jaque', () => {
+  it('van del atacante al rey', () => {
+    const sesion = nueva('1. e4 f5')
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'd1 h5')
+
+    expect(eventos[0].rayos).toEqual([{ desde: 'h5', hasta: 'e8' }])
+  })
+
+  it('en un jaque descubierto salen de la pieza que ataca, no de la que se movió', () => {
+    const sesion = desdeFen('4k3/8/8/8/8/4B3/8/4R2K w - - 0 1')
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'e3 c5')
+
+    expect(eventos[0].rayos).toEqual([{ desde: 'e1', hasta: 'e8' }])
+  })
+
+  it('en un jaque doble hay un rayo por atacante', () => {
+    const sesion = desdeFen('4k3/8/8/8/4N3/8/8/4R2K w - - 0 1')
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'e4 f6')
+
+    expect(eventos[0].rayos).toHaveLength(2)
+    expect(eventos[0].rayos).toEqual(
+      expect.arrayContaining([
+        { desde: 'e1', hasta: 'e8' },
+        { desde: 'f6', hasta: 'e8' },
+      ]),
+    )
+  })
+
+  it('el jaque mate también lleva su rayo', () => {
+    const sesion = nueva('1. f3 e5 2. g4')
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'd8 h4')
+
+    expect(eventos[0].rayos).toEqual([{ desde: 'h4', hasta: 'e1' }])
+  })
+})
+
+describe('aviso de fin de animación', () => {
+  it('no hay ninguna Jugada en escena al empezar ni al recuperar una Partida', () => {
+    expect(nueva().obtenerEstado().jugadaEnEscena).toBeNull()
+    expect(nueva('1. e4 e5').obtenerEstado().jugadaEnEscena).toBeNull()
+  })
+
+  it('la Jugada entra en escena con su evento, a la vez que la posición', () => {
+    const sesion = nueva()
+    const eventos = eventosDe(sesion)
+    const vistas: (EventoDeJugada | null)[] = []
+    sesion.suscribir(() => vistas.push(sesion.obtenerEstado().jugadaEnEscena))
+
+    jugar(sesion, 'e2 e4')
+
+    expect(vistas).toEqual([null, eventos[0]])
+    expect(sesion.obtenerEstado().jugadaEnEscena).toEqual(eventos[0])
+  })
+
+  it('el aviso saca la Jugada de escena sin tocar la posición', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    const { piezas, turno, historial } = sesion.obtenerEstado()
+    sesion.terminarAnimacion()
+
+    expect(sesion.obtenerEstado().jugadaEnEscena).toBeNull()
+    expect(sesion.obtenerEstado()).toMatchObject({ piezas, turno, historial })
+  })
+
+  it('un aviso sin Jugada en escena no hace nada ni avisa', () => {
+    const sesion = nueva()
+    const antes = sesion.obtenerEstado()
+    let avisos = 0
+    sesion.suscribir(() => avisos++)
+
+    sesion.terminarAnimacion()
+
+    expect(sesion.obtenerEstado()).toBe(antes)
+    expect(avisos).toBe(0)
+  })
+
+  it('una Jugada nueva reemplaza a la que seguía en escena', () => {
+    const sesion = nueva()
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'e2 e4', 'e7 e5')
+
+    expect(sesion.obtenerEstado().jugadaEnEscena).toEqual(eventos[1])
+  })
+
+  it('seleccionar una pieza no la saca de escena', () => {
+    const sesion = nueva()
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'e2 e4')
+    sesion.tocarCasilla('e7')
+    sesion.girar()
+
+    expect(sesion.obtenerEstado().jugadaEnEscena).toEqual(eventos[0])
+  })
+
+  it('Deshacer la retira de escena', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado().jugadaEnEscena).toBeNull()
+  })
+
+  it('empezar la retira de escena', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado().jugadaEnEscena).toBeNull()
   })
 })
 
@@ -703,11 +828,13 @@ describe('pantalla final', () => {
     expect(sesion.obtenerEstado().pantallaFinal).toBe(false)
   })
 
-  it('se abre al terminar la Partida', () => {
+  it('se abre al acabar la animación de la Jugada que termina la Partida', () => {
     const sesion = nueva('1. f3 e5 2. g4')
 
     jugar(sesion, 'd8 h4')
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(false)
 
+    sesion.terminarAnimacion()
     expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
   })
 
@@ -740,6 +867,7 @@ describe('pantalla final', () => {
     sesion.verLaPartida()
     sesion.deshacer()
     jugar(sesion, 'd8 h4')
+    sesion.terminarAnimacion()
 
     expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
   })
@@ -823,6 +951,7 @@ describe('«Nueva partida»', () => {
 
     sesion.abrirEleccion()
     jugar(sesion, 'd8 h4')
+    sesion.terminarAnimacion()
     expect(sesion.obtenerEstado().eleccion).toEqual({ aviso: false })
 
     sesion.volverALaPartida()
@@ -985,6 +1114,7 @@ describe('empezar', () => {
     sesion.verLaPartida()
     sesion.empezar()
     jugar(sesion, 'f2 f3', 'e7 e5', 'g2 g4', 'd8 h4')
+    sesion.terminarAnimacion()
 
     expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
   })

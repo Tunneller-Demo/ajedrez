@@ -1,6 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import type { PieceSymbol, Square } from 'chess.js'
-import type { Bando, EstadoDePartida, Pieza, Resultado, SesionDePartida } from './sesion/sesionDePartida'
+import { EscenaDeJugada } from './EscenaDeJugada'
+import { urlDePieza } from './piezas'
+import {
+  bandoContrario,
+  type Bando,
+  type EstadoDePartida,
+  type Pieza,
+  type Resultado,
+  type SesionDePartida,
+} from './sesion/sesionDePartida'
 
 const COLUMNAS = 'abcdefgh'
 const CASILLAS = [8, 7, 6, 5, 4, 3, 2, 1].flatMap((fila) => [...COLUMNAS].map((columna) => `${columna}${fila}` as Square))
@@ -23,9 +32,6 @@ const CORONACIONES: { tipo: PieceSymbol; etiqueta: string }[] = [
 ]
 
 const nombreDelBando = (bando: Bando) => (bando === 'w' ? 'blancas' : 'negras')
-
-const urlDePieza = (bando: Bando, tipo: PieceSymbol) =>
-  `${import.meta.env.BASE_URL}piezas/gala/${bando}${tipo.toUpperCase()}.svg`
 
 function nombreDePieza({ tipo, bando }: Omit<Pieza, 'casilla'>) {
   const { nombre, femenino } = NOMBRES[tipo]
@@ -61,6 +67,7 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
   const destino = estado.destinos.find((d) => d.casilla === casilla)
   const seleccionada = estado.seleccion === casilla
   const ultima = casilla === estado.ultimaJugada?.desde || casilla === estado.ultimaJugada?.hasta
+  const enVuelo = casilla === estado.jugadaEnEscena?.hasta || casilla === estado.jugadaEnEscena?.torre?.hasta
   // a1 es oscura: la suma de columna (desde 0) y fila es impar en las oscuras.
   const clara = (COLUMNAS.indexOf(casilla[0]) + Number(casilla[1])) % 2 === 0
   const etiqueta = [casilla, pieza && nombreDePieza(pieza), destino && 'casilla válida'].filter(Boolean).join(', ')
@@ -87,7 +94,7 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
           src={urlDePieza(pieza.bando, pieza.tipo)}
           alt=""
           draggable={false}
-          className="absolute inset-0 size-full select-none"
+          className={`absolute inset-0 size-full select-none ${enVuelo ? 'invisible' : ''}`}
         />
       )}
       {casilla[0] === (estado.girado ? 'h' : 'a') && (
@@ -111,7 +118,7 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
 }
 
 function Capturadas({ bando, estado }: { bando: Bando; estado: EstadoDePartida }) {
-  const rival = bando === 'w' ? 'b' : 'w'
+  const rival = bandoContrario(bando)
 
   return (
     <ul
@@ -160,7 +167,17 @@ const ACCION =
   'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase enabled:hover:text-marfil disabled:cursor-default disabled:opacity-40 lateral:h-9 compacta:h-11'
 
 // El efecto de diseño cierra el dialog antes de desmontarlo, para que el foco vuelva a donde estaba.
-function Capa({ titulo, alCancelar, children }: { titulo: string; alCancelar: () => void; children: ReactNode }) {
+function Capa({
+  titulo,
+  alCancelar,
+  clase = '',
+  children,
+}: {
+  titulo: string
+  alCancelar: () => void
+  clase?: string
+  children: ReactNode
+}) {
   const dialogo = useRef<HTMLDialogElement>(null)
 
   useLayoutEffect(() => {
@@ -170,7 +187,7 @@ function Capa({ titulo, alCancelar, children }: { titulo: string; alCancelar: ()
   }, [])
 
   return (
-    <dialog ref={dialogo} aria-label={titulo} onCancel={alCancelar} className="capa">
+    <dialog ref={dialogo} aria-label={titulo} onCancel={alCancelar} className={`capa ${clase}`}>
       {children}
     </dialog>
   )
@@ -181,9 +198,11 @@ const ACCIONES_DE_CAPA = 'mt-4 flex w-full max-w-md flex-wrap justify-center gap
 
 function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: SesionDePartida }) {
   const { titulo, detalle } = textosDelResultado(resultado)
+  const mate = resultado.tipo === 'jaque-mate'
 
   return (
-    <Capa titulo={titulo} alCancelar={sesion.verLaPartida}>
+    <Capa titulo={titulo} alCancelar={sesion.verLaPartida} clase={mate ? 'escena-de-mate' : ''}>
+      {mate && <img src={urlDePieza(resultado.ganador, 'k')} alt="" className="rey-vencedor" />}
       <h2 className={TITULO_DE_CAPA}>{titulo}</h2>
       <p className="mt-2 font-cinzel text-sm tracking-[0.3em] text-oro uppercase">{detalle}</p>
       <div className={ACCIONES_DE_CAPA}>
@@ -225,7 +244,11 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
 
   return (
     <>
-      <div aria-hidden className="foco" style={{ '--foco-y': luzAbajo ? '82%' : '18%' } as CSSProperties} />
+      <div
+        aria-hidden
+        className={`foco ${estado.jaque ? 'foco-en-jaque' : ''}`}
+        style={{ '--foco-y': luzAbajo ? '82%' : '18%' } as CSSProperties}
+      />
       <main className="pantalla">
         <h1 className="text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase [grid-area:titulo] lateral:text-left compacta:sr-only">
           Ajedrez de Gala
@@ -242,6 +265,14 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
             {(estado.girado ? CASILLAS_GIRADAS : CASILLAS).map((casilla) => (
               <Casilla key={casilla} casilla={casilla} estado={estado} sesion={sesion} />
             ))}
+            {estado.jugadaEnEscena && (
+              <EscenaDeJugada
+                key={estado.historial.length}
+                jugada={estado.jugadaEnEscena}
+                girado={estado.girado}
+                sesion={sesion}
+              />
+            )}
             {estado.coronacion && (
               <div
                 role="group"

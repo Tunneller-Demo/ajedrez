@@ -227,19 +227,166 @@ test.describe('Partida a dos bajo la ruta base', () => {
     await expect(casilla(page, 'e4')).toHaveAccessibleDescription('')
   })
 
-  // Mide la franja inferior de la pantalla, siempre libre de tablero y de texto.
-  async function luzAbajo(page: Page) {
+  // Lee una franja de 8 px de la pantalla: la de abajo está siempre libre de tablero y de texto.
+  async function franja(page: Page, lugar: 'arriba' | 'abajo') {
     const captura = (await page.screenshot()).toString('base64')
-    return page.evaluate(async (datos) => {
-      const imagen = new Image()
-      imagen.src = `data:image/png;base64,${datos}`
-      await imagen.decode()
-      const lienzo = new OffscreenCanvas(imagen.width, imagen.height).getContext('2d')!
-      lienzo.drawImage(imagen, 0, 0)
-      const { data } = lienzo.getImageData(0, imagen.height - 8, imagen.width, 8)
-      return data.reduce((suma, canal) => suma + canal, 0) / data.length
-    }, captura)
+    return page.evaluate(
+      async ({ datos, lugar }) => {
+        const imagen = new Image()
+        imagen.src = `data:image/png;base64,${datos}`
+        await imagen.decode()
+        const lienzo = new OffscreenCanvas(imagen.width, imagen.height).getContext('2d')!
+        lienzo.drawImage(imagen, 0, 0)
+        return [...lienzo.getImageData(0, lugar === 'arriba' ? 0 : imagen.height - 8, imagen.width, 8).data]
+      },
+      { datos: captura, lugar },
+    )
   }
+
+  const media = (canales: number[]) => canales.reduce((suma, canal) => suma + canal, 0) / canales.length
+
+  const luzAbajo = async (page: Page) => media(await franja(page, 'abajo'))
+
+  // Rojo sobre azul en lo alto de la pantalla, donde cae el foco con negras en turno.
+  async function rojoArriba(page: Page) {
+    const canales = await franja(page, 'arriba')
+    return media(canales.filter((_, indice) => indice % 4 === 0)) - media(canales.filter((_, indice) => indice % 4 === 2))
+  }
+
+  type Vista = { nombre: string; x: number; y: number }
+  type ConVistas = Window & { vistas: Vista[] }
+
+  // Apunta, fotograma a fotograma, cada animación de la página con el centro de lo que anima al aparecer.
+  const grabarAnimaciones = (page: Page) =>
+    page.evaluate(() => {
+      const ventana = window as unknown as ConVistas
+      const conocidas = new Set<Animation>()
+      ventana.vistas = []
+      const mirar = () => {
+        for (const animacion of document.getAnimations()) {
+          if (conocidas.has(animacion)) continue
+          conocidas.add(animacion)
+          const caja = (animacion.effect as KeyframeEffect).target!.getBoundingClientRect()
+          ventana.vistas.push({
+            nombre: (animacion as CSSAnimation).animationName ?? (animacion as CSSTransition).transitionProperty,
+            x: caja.x + caja.width / 2,
+            y: caja.y + caja.height / 2,
+          })
+        }
+        requestAnimationFrame(mirar)
+      }
+      mirar()
+    })
+
+  const vistas = (page: Page) => page.evaluate(() => (window as unknown as ConVistas).vistas)
+  const cuantas = async (page: Page, nombre: string) => (await vistas(page)).filter((v) => v.nombre === nombre).length
+
+  test('la pieza vuela y al posarse queda en su casilla', async ({ page, isMobile }) => {
+    await grabarAnimaciones(page)
+    await tocador(page, isMobile).jugar('e2 e4')
+
+    await expect.poll(() => cuantas(page, 'vuelo')).toBe(1)
+    await expect(casilla(page, 'e4').locator('img')).toBeVisible()
+    await expect(page.getByRole('main').locator('img')).toHaveCount(32)
+  })
+
+  test('en el enroque vuelan el rey y la torre', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+
+    await jugar('e2 e4', 'e7 e5', 'g1 f3', 'b8 c6', 'f1 c4', 'f8 c5')
+    await page.waitForFunction(() => document.getAnimations().length === 0)
+    await grabarAnimaciones(page)
+    await jugar('e1 g1')
+
+    await expect.poll(() => cuantas(page, 'vuelo')).toBe(2)
+    await expect(casilla(page, 'g1').locator('img')).toBeVisible()
+    await expect(casilla(page, 'f1').locator('img')).toBeVisible()
+  })
+
+  test('la captura al paso disuelve el peón en su casilla real, con polvo de oro', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+
+    await jugar('e2 e4', 'a7 a6', 'e4 e5', 'd7 d5')
+    await grabarAnimaciones(page)
+    await jugar('e5 d6')
+
+    await expect.poll(() => cuantas(page, 'mota')).toBeGreaterThan(0)
+    const caja = (await casilla(page, 'd5').boundingBox())!
+    const [disolucion] = (await vistas(page)).filter((v) => v.nombre === 'disolucion')
+    expect(disolucion.x).toBeCloseTo(caja.x + caja.width / 2, 0)
+    expect(disolucion.y).toBeCloseTo(caja.y + caja.height / 2, 0)
+  })
+
+  test('en la Coronación el peón se funde con la pieza elegida al posarse', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar('a2 a4', 'b7 b5', 'a4 b5', 'a7 a6', 'b5 a6', 'c8 b7', 'a6 b7', 'b8 c6', 'b7 a8')
+    await grabarAnimaciones(page)
+    await pulsar(boton(page, 'Caballo'))
+
+    await expect.poll(() => cuantas(page, 'coronada')).toBe(1)
+  })
+
+  test('el jaque traza un rayo y tiñe el foco de rojo', async ({ page, isMobile }) => {
+    const { jugar } = tocador(page, isMobile)
+
+    await jugar('e2 e4', 'f7 f5', 'a2 a3')
+    await page.waitForFunction(() => document.getAnimations().length === 0)
+    const sinJaque = await rojoArriba(page)
+
+    await jugar('a7 a6')
+    await grabarAnimaciones(page)
+    await jugar('d1 h5')
+
+    await expect.poll(() => cuantas(page, 'rayo')).toBe(1)
+    await expect.poll(() => rojoArriba(page)).toBeGreaterThan(sinJaque + 2)
+  })
+
+  test('el jaque mate apaga la escena, sube el rey vencedor y muestra el título', async ({ page, isMobile }) => {
+    await grabarAnimaciones(page)
+    await tocador(page, isMobile).jugar(...mateDelLoco)
+
+    await expect(capa(page).getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+    await expect(capa(page).locator('img')).toHaveAttribute('src', /bK\.svg$/)
+    await expect.poll(() => cuantas(page, 'apagon')).toBe(1)
+    await expect.poll(() => cuantas(page, 'subir')).toBe(1)
+    await expect.poll(() => cuantas(page, 'titulo')).toBe(1)
+  })
+
+  test('una Jugada corta la animación de la anterior y solo avisa la última', async ({ page }) => {
+    await grabarAnimaciones(page)
+
+    // Toca desde la página, un fotograma por casilla: con Playwright las Jugadas no llegan a pisarse.
+    await page.evaluate(async (jugadas) => {
+      for (const nombre of jugadas.join(' ').split(' ')) {
+        document.querySelector<HTMLElement>(`[aria-label="${nombre}"], [aria-label^="${nombre},"]`)!.click()
+        await new Promise(requestAnimationFrame)
+      }
+    }, mateDelLoco)
+
+    expect(await capa(page).count()).toBe(0)
+    await expect(capa(page).getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+    await expect.poll(() => cuantas(page, 'vuelo')).toBe(4)
+  })
+
+  test.describe('con prefers-reduced-motion', () => {
+    test.use({ contextOptions: { reducedMotion: 'reduce' } })
+
+    test('no hay ninguna animación y la Sesión de Partida recibe el aviso', async ({ page, isMobile }) => {
+      const { jugar } = tocador(page, isMobile)
+
+      await grabarAnimaciones(page)
+      await jugar('e2 e4')
+      await expect(casilla(page, 'e4').locator('img')).toBeVisible()
+
+      // Captura, jaque y mate. La pantalla final solo se abre tras el aviso.
+      await jugar('f7 f5', 'e4 f5', 'g7 g5', 'd1 h5')
+      await expect(capa(page).getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+      await expect(capa(page).locator('img')).toBeVisible()
+
+      expect(await vistas(page)).toEqual([])
+    })
+  })
 
   test('el foco sigue al Bando en turno', async ({ page, isMobile }) => {
     const { jugar } = tocador(page, isMobile)

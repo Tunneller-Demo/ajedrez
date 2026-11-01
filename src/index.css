@@ -38,24 +38,37 @@
   initial-value: 82%;
 }
 
+@property --tono-foco {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #785caa;
+}
+
 .foco {
+  --tono-foco: var(--color-foco);
   position: fixed;
   inset: 0;
   pointer-events: none;
   background: radial-gradient(
     ellipse 75% 60% at 50% var(--foco-y),
-    color-mix(in srgb, var(--color-foco) 34%, transparent),
+    color-mix(in srgb, var(--tono-foco) 34%, transparent),
     transparent 70%
   );
-  transition: --foco-y 0.9s ease-in-out;
+  transition:
+    --foco-y 0.9s ease-in-out,
+    --tono-foco 0.6s ease-in-out;
 
   @variant lateral {
     background: radial-gradient(
       ellipse 50% 60% at 34% var(--foco-y),
-      color-mix(in srgb, var(--color-foco) 38%, transparent),
+      color-mix(in srgb, var(--tono-foco) 38%, transparent),
       transparent 72%
     );
   }
+}
+
+.foco-en-jaque {
+  --tono-foco: var(--color-peligro);
 }
 
 /* --lado es el del tablero. En vertical descuenta título, turno, franjas, Historial y acciones. */
@@ -112,8 +125,193 @@
   backdrop-filter: blur(6px);
 }
 
+/* Escena de una Jugada. --vuelo es lo que tarda la pieza; lo demás arranca al posarse. */
+.escena-de-jugada {
+  --vuelo: 620ms;
+  --posarse: 480ms;
+  --en-el-aire: drop-shadow(0 14px 10px rgb(0 0 0 / 0.8)) drop-shadow(0 0 10px rgb(216 178 92 / 0.8));
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.vuelo,
+.coronada,
+.disolucion,
+.polvo {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+}
+
+.vuelo {
+  z-index: 2;
+  animation: vuelo var(--vuelo) cubic-bezier(0.65, 0, 0.2, 1) both;
+
+  /* El peón se funde con la pieza elegida al posarse. */
+  &:has(+ .coronada) {
+    --al-posarse: 0;
+  }
+}
+
+.coronada {
+  z-index: 2;
+  animation: coronada var(--vuelo) both;
+}
+
+.disolucion {
+  animation: disolucion 750ms ease-in var(--posarse) both;
+}
+
+/* Contenedor para que las motas midan su recorrido en casillas (cqw). */
+.polvo {
+  z-index: 3;
+  container-type: inline-size;
+
+  i {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    background: #ffe7a8;
+    border-radius: 50%;
+    box-shadow: 0 0 8px 2px var(--color-oro);
+    opacity: 0;
+    animation: mota 900ms ease-out forwards;
+  }
+}
+
+.rayos {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+
+  line {
+    stroke: var(--color-peligro);
+    stroke-width: 0.045;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    filter: drop-shadow(0 0 0.1px var(--color-peligro));
+    opacity: 0;
+    animation: rayo 800ms ease-out var(--posarse) forwards;
+  }
+}
+
+/* El movimiento va en la capa de la pantalla final: el rey y el título no retrasan las acciones. */
+.escena-de-mate {
+  animation: apagon 700ms ease-in both;
+}
+
+.rey-vencedor {
+  width: min(24vh, 11rem);
+  filter: drop-shadow(0 0 28px rgb(216 178 92 / 0.8));
+  animation: subir 1100ms cubic-bezier(0.2, 0.7, 0.2, 1) 300ms both;
+}
+
+.escena-de-mate h2 {
+  animation: titulo 1000ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
+}
+
+@keyframes vuelo {
+  0% {
+    transform: translate(calc(var(--dx) * 100%), calc(var(--dy) * 100%));
+    filter: none;
+  }
+  25% {
+    transform: translate(calc(var(--dx) * 100%), calc(var(--dy) * 100%)) scale(1.2);
+    filter: var(--en-el-aire);
+  }
+  80% {
+    transform: scale(1.2);
+    filter: var(--en-el-aire);
+  }
+  100% {
+    transform: none;
+    filter: none;
+    opacity: var(--al-posarse, 1);
+  }
+}
+
+@keyframes coronada {
+  0%,
+  80% {
+    opacity: 0;
+  }
+}
+
+@keyframes disolucion {
+  to {
+    opacity: 0;
+    filter: brightness(3.5) blur(5px);
+    scale: 1.3;
+  }
+}
+
+@keyframes mota {
+  from {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  to {
+    opacity: 0;
+    transform: translate(calc(var(--x) * 100cqw), calc(var(--y) * 100cqw)) scale(0.2);
+  }
+}
+
+@keyframes rayo {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0.9;
+  }
+  60% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes apagon {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes subir {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.85);
+  }
+}
+
+@keyframes titulo {
+  from {
+    opacity: 0;
+    letter-spacing: 0.3em;
+    filter: blur(8px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .foco {
     transition: none;
+  }
+
+  /* Sin la capa no hay animaciones que esperar y la Sesión de Partida recibe el aviso enseguida. */
+  .escena-de-jugada {
+    display: none;
+  }
+
+  .escena-de-mate,
+  .escena-de-mate h2,
+  .rey-vencedor {
+    animation: none;
   }
 }

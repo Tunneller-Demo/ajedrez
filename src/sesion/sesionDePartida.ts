@@ -27,6 +27,7 @@ export type EstadoDePartida = {
   girado: boolean
   pantallaFinal: boolean
   eleccion: { aviso: boolean } | null
+  jugadaEnEscena: EventoDeJugada | null
 }
 
 export type EventoDeJugada = {
@@ -39,6 +40,7 @@ export type EventoDeJugada = {
   torre: { desde: Square; hasta: Square } | null
   coronacion: PieceSymbol | null
   jaque: boolean
+  rayos: { desde: Square; hasta: Square }[]
   resultado: Resultado | null
 }
 
@@ -55,10 +57,13 @@ export type SesionDePartida = {
   verLaPartida(): void
   abrirEleccion(): void
   volverALaPartida(): void
+  terminarAnimacion(): void
   obtenerEstado(): EstadoDePartida
   suscribir(oyente: () => void): () => void
   alJugar(oyente: (evento: EventoDeJugada) => void): () => void
 }
+
+export const bandoContrario = (bando: Bando): Bando => (bando === 'w' ? 'b' : 'w')
 
 const FIGURITAS: Record<string, string> = { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞' }
 
@@ -66,7 +71,7 @@ const conFiguritas = (san: string) => san.replace(/[KQRBN]/g, (letra) => FIGURIT
 
 // El jaque mate va primero: en la media jugada 100 también cuenta como tablas.
 function calcularResultado(chess: Chess): Resultado | null {
-  if (chess.isCheckmate()) return { tipo: 'jaque-mate', ganador: chess.turn() === 'w' ? 'b' : 'w' }
+  if (chess.isCheckmate()) return { tipo: 'jaque-mate', ganador: bandoContrario(chess.turn()) }
   if (chess.isStalemate()) return { tipo: 'ahogado' }
   if (chess.isInsufficientMaterial()) return { tipo: 'tablas', motivo: 'material-insuficiente' }
   if (chess.isThreefoldRepetition()) return { tipo: 'tablas', motivo: 'triple-repeticion' }
@@ -86,6 +91,14 @@ function torreDelEnroque(jugada: Move) {
   return null
 }
 
+// Se pregunta a la posición y no a la Jugada: en un jaque descubierto ataca otra pieza.
+function rayosDelJaque(chess: Chess) {
+  if (!chess.isCheck()) return []
+  const turno = chess.turn()
+  const [rey] = chess.findPiece({ type: 'k', color: turno })
+  return chess.attackers(rey, bandoContrario(turno)).map((desde) => ({ desde, hasta: rey }))
+}
+
 export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida {
   const chess = restaurarPartida(almacen)
 
@@ -94,6 +107,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   let girado = false
   let finalCerrado = false
   let eleccionAbierta = false
+  let jugadaEnEscena: EventoDeJugada | null = null
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
 
@@ -121,8 +135,9 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       historial: jugadas.map(({ san }) => conFiguritas(san)),
       capturadas,
       girado,
-      pantallaFinal: Boolean(resultado) && !finalCerrado,
+      pantallaFinal: Boolean(resultado) && !finalCerrado && !jugadaEnEscena,
       eleccion: eleccionAbierta ? { aviso: jugadas.length > 0 && !resultado } : null,
+      jugadaEnEscena,
     }
   }
 
@@ -136,7 +151,6 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   function jugar({ from, to, promotion }: Move) {
     const jugada = chess.move({ from, to, promotion })
     guardarPartida(almacen, chess)
-    publicar(null, null)
     const evento: EventoDeJugada = {
       bando: jugada.color,
       pieza: jugada.piece,
@@ -146,9 +160,12 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       captura: jugada.captured ? { pieza: jugada.captured, casilla: casillaCapturada(jugada) } : null,
       torre: torreDelEnroque(jugada),
       coronacion: jugada.promotion ?? null,
-      jaque: estado.jaque,
-      resultado: estado.resultado,
+      jaque: chess.isCheck(),
+      rayos: rayosDelJaque(chess),
+      resultado: calcularResultado(chess),
     }
+    jugadaEnEscena = evento
+    publicar(null, null)
     oyentesDeJugada.forEach((oyente) => oyente(evento))
   }
 
@@ -176,6 +193,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     if (!chess.undo()) return
     guardarPartida(almacen, chess)
     finalCerrado = false
+    jugadaEnEscena = null
     publicar(null, null)
   }
 
@@ -190,6 +208,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     girado = false
     finalCerrado = false
     eleccionAbierta = false
+    jugadaEnEscena = null
     publicar(null, null)
   }
 
@@ -208,6 +227,12 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     publicar(estado.seleccion, estado.coronacion)
   }
 
+  function terminarAnimacion() {
+    if (!jugadaEnEscena) return
+    jugadaEnEscena = null
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
   return {
     tocarCasilla,
     coronar,
@@ -217,6 +242,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     verLaPartida,
     abrirEleccion,
     volverALaPartida,
+    terminarAnimacion,
     obtenerEstado: () => estado,
     suscribir(oyente) {
       oyentes.add(oyente)
