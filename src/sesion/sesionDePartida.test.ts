@@ -17,6 +17,8 @@ const nueva = (pgn?: string) => crearSesionDePartida(dobles(), pgn)
 
 const desdeFen = (fen: string) => nueva(`[SetUp "1"]\n[FEN "${fen}"]\n\n*`)
 
+const mate = '1. f3 e5 2. g4 Qh4#'
+
 function jugar(sesion: SesionDePartida, ...jugadas: `${Square} ${Square}`[]) {
   for (const jugada of jugadas) {
     const [desde, hasta] = jugada.split(' ') as Square[]
@@ -460,7 +462,7 @@ describe('Deshacer a dos', () => {
   })
 
   it('tras un jaque mate quita el Resultado y devuelve el turno', () => {
-    const sesion = nueva('1. f3 e5 2. g4 Qh4#')
+    const sesion = nueva(mate)
 
     sesion.deshacer()
 
@@ -530,7 +532,7 @@ describe('Girar', () => {
   })
 
   it('se puede girar con la Partida terminada', () => {
-    const sesion = nueva('1. f3 e5 2. g4 Qh4#')
+    const sesion = nueva(mate)
 
     sesion.girar()
 
@@ -676,7 +678,7 @@ describe('Resultado', () => {
   })
 
   it('una Partida terminada ignora toda acción', () => {
-    const sesion = nueva('1. f3 e5 2. g4 Qh4#')
+    const sesion = nueva(mate)
     const antes = sesion.obtenerEstado()
 
     sesion.tocarCasilla('e1')
@@ -685,5 +687,191 @@ describe('Resultado', () => {
 
     expect(antes.resultado).toEqual({ tipo: 'jaque-mate', ganador: 'b' })
     expect(sesion.obtenerEstado()).toBe(antes)
+  })
+})
+
+describe('pantalla final', () => {
+  it('está cerrada mientras la Partida sigue', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(false)
+  })
+
+  it('se abre al terminar la Partida', () => {
+    const sesion = nueva('1. f3 e5 2. g4')
+
+    jugar(sesion, 'd8 h4')
+
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
+  })
+
+  it('«Ver la partida» la cierra y conserva el Resultado y el Historial', () => {
+    const sesion = nueva(mate)
+
+    sesion.verLaPartida()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado.pantallaFinal).toBe(false)
+    expect(estado.resultado).toEqual({ tipo: 'jaque-mate', ganador: 'b' })
+    expect(estado.historial).toHaveLength(4)
+  })
+
+  it('Deshacer retira solo la última Jugada, devuelve el turno y quita el Resultado', () => {
+    const sesion = nueva(mate)
+
+    sesion.deshacer()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado.pantallaFinal).toBe(false)
+    expect(estado.resultado).toBeNull()
+    expect(estado.turno).toBe('b')
+    expect(estado.historial).toEqual(['f3', 'e5', 'g4'])
+  })
+
+  it('se abre otra vez si tras verla y deshacer la Partida vuelve a terminar', () => {
+    const sesion = nueva(mate)
+
+    sesion.verLaPartida()
+    sesion.deshacer()
+    jugar(sesion, 'd8 h4')
+
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
+  })
+})
+
+describe('«Nueva partida»', () => {
+  it('la capa está cerrada al empezar', () => {
+    expect(nueva().obtenerEstado().eleccion).toBeNull()
+  })
+
+  it('sin Jugadas abre la capa sin aviso', () => {
+    const sesion = nueva()
+
+    sesion.abrirEleccion()
+
+    expect(sesion.obtenerEstado().eleccion).toEqual({ aviso: false })
+  })
+
+  it('con la Partida en curso abre la capa con el aviso', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4')
+    sesion.abrirEleccion()
+
+    expect(sesion.obtenerEstado().eleccion).toEqual({ aviso: true })
+  })
+
+  it('con la Partida terminada abre la capa sin aviso', () => {
+    const sesion = nueva(mate)
+
+    sesion.verLaPartida()
+    sesion.abrirEleccion()
+
+    expect(sesion.obtenerEstado().eleccion).toEqual({ aviso: false })
+  })
+
+  it('abrir la capa no reemplaza la Partida', () => {
+    const sesion = nueva('1. e4 e5')
+    const { piezas, historial, turno } = sesion.obtenerEstado()
+
+    sesion.abrirEleccion()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ piezas, historial, turno })
+  })
+
+  it('«Volver a la partida» cierra la capa y deja todo como estaba', () => {
+    const sesion = nueva('1. e4 e5')
+
+    sesion.girar()
+    sesion.tocarCasilla('g1')
+    const antes = sesion.obtenerEstado()
+
+    sesion.abrirEleccion()
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado()).toEqual(antes)
+  })
+
+  it('«Volver a la partida» conserva la Coronación pendiente', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    sesion.abrirEleccion()
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado().coronacion).toEqual({ desde: 'a7', hasta: 'a8' })
+  })
+
+  it('«Volver a la partida» no reabre la pantalla final ya cerrada', () => {
+    const sesion = nueva(mate)
+
+    sesion.verLaPartida()
+    sesion.abrirEleccion()
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(false)
+  })
+
+  it('«Volver a la partida» muestra la pantalla final si la Partida terminó con la capa abierta', () => {
+    const sesion = nueva('1. f3 e5 2. g4')
+
+    sesion.abrirEleccion()
+    jugar(sesion, 'd8 h4')
+    expect(sesion.obtenerEstado().eleccion).toEqual({ aviso: false })
+
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ eleccion: null, pantallaFinal: true })
+  })
+
+  it('la Partida solo se reemplaza al empezar la nueva, y eso cierra la capa', () => {
+    const sesion = nueva('1. e4 e5')
+
+    sesion.abrirEleccion()
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+})
+
+describe('empezar', () => {
+  it('devuelve la posición inicial con el tablero sin girar', () => {
+    const sesion = nueva(mate)
+    const inicio = nueva().obtenerEstado()
+
+    sesion.girar()
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado()).toEqual(inicio)
+  })
+
+  it('quita la selección y las capturadas', () => {
+    const sesion = nueva('1. e4 d5 2. exd5')
+
+    sesion.tocarCasilla('g8')
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+
+  it('quita la Coronación pendiente', () => {
+    const sesion = desdeFen('8/P6k/8/8/8/8/6K1/8 w - - 0 1')
+
+    jugar(sesion, 'a7 a8')
+    sesion.empezar()
+
+    expect(sesion.obtenerEstado()).toEqual(nueva().obtenerEstado())
+  })
+
+  it('tras «Ver la partida», la siguiente Partida vuelve a abrir la pantalla final', () => {
+    const sesion = nueva(mate)
+
+    sesion.verLaPartida()
+    sesion.empezar()
+    jugar(sesion, 'f2 f3', 'e7 e5', 'g2 g4', 'd8 h4')
+
+    expect(sesion.obtenerEstado().pantallaFinal).toBe(true)
   })
 })

@@ -94,6 +94,24 @@
   }
 }
 
+/* Pantalla final y elección de Partida: cubren toda la escena. */
+.capa {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  text-align: center;
+  color: var(--color-marfil);
+  background: radial-gradient(circle at 50% 40%, rgb(70 50 110 / 0.5), rgb(5 4 9 / 0.97) 62%);
+  backdrop-filter: blur(6px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .foco {
     transition: none;

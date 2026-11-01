@@ -1,6 +1,6 @@
-import { useEffect, useRef, useSyncExternalStore, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import type { PieceSymbol, Square } from 'chess.js'
-import type { Bando, EstadoDePartida, Pieza, SesionDePartida } from './sesion/sesionDePartida'
+import type { Bando, EstadoDePartida, Pieza, Resultado, SesionDePartida } from './sesion/sesionDePartida'
 
 const COLUMNAS = 'abcdefgh'
 const CASILLAS = [8, 7, 6, 5, 4, 3, 2, 1].flatMap((fila) => [...COLUMNAS].map((columna) => `${columna}${fila}` as Square))
@@ -33,6 +33,14 @@ function nombreDePieza({ tipo, bando }: Omit<Pieza, 'casilla'>) {
   return `${nombre} ${adjetivo}`
 }
 
+function textosDelResultado(resultado: Resultado) {
+  if (resultado.tipo === 'jaque-mate') return { titulo: 'Jaque mate', detalle: `ganan las ${nombreDelBando(resultado.ganador)}` }
+  if (resultado.tipo === 'ahogado') return { titulo: 'Ahogado', detalle: 'tablas' }
+  if (resultado.motivo === '50-jugadas') return { titulo: 'Tablas', detalle: 'por la regla de las 50 jugadas' }
+  if (resultado.motivo === 'triple-repeticion') return { titulo: 'Tablas', detalle: 'por triple repetición' }
+  return { titulo: 'Tablas', detalle: 'por material insuficiente' }
+}
+
 function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {
   if (!resultado) {
     return (
@@ -42,11 +50,8 @@ function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {
       </>
     )
   }
-  if (resultado.tipo === 'jaque-mate') return `Jaque mate: ganan las ${nombreDelBando(resultado.ganador)}`
-  if (resultado.tipo === 'ahogado') return 'Ahogado: tablas'
-  if (resultado.motivo === '50-jugadas') return 'Tablas por la regla de las 50 jugadas'
-  if (resultado.motivo === 'triple-repeticion') return 'Tablas por triple repetición'
-  return 'Tablas por material insuficiente'
+  const { titulo, detalle } = textosDelResultado(resultado)
+  return resultado.tipo === 'tablas' ? `${titulo} ${detalle}` : `${titulo}: ${detalle}`
 }
 
 const COORDENADA = 'absolute font-cinzel text-[clamp(9px,1.6vmin,13px)] leading-none text-oro'
@@ -154,6 +159,65 @@ function Historial({ historial }: { historial: string[] }) {
 const ACCION =
   'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase enabled:hover:text-marfil disabled:cursor-default disabled:opacity-40 lateral:h-9 compacta:h-11'
 
+// El efecto de diseño cierra el dialog antes de desmontarlo, para que el foco vuelva a donde estaba.
+function Capa({ titulo, alCancelar, children }: { titulo: string; alCancelar: () => void; children: ReactNode }) {
+  const dialogo = useRef<HTMLDialogElement>(null)
+
+  useLayoutEffect(() => {
+    const abierto = dialogo.current
+    abierto?.showModal()
+    return () => abierto?.close()
+  }, [])
+
+  return (
+    <dialog ref={dialogo} aria-label={titulo} onCancel={alCancelar} className="capa">
+      {children}
+    </dialog>
+  )
+}
+
+const TITULO_DE_CAPA = 'text-5xl leading-none text-marfil italic lateral:text-7xl compacta:text-5xl'
+const ACCIONES_DE_CAPA = 'mt-4 flex w-full max-w-md flex-wrap justify-center gap-x-6 gap-y-1 px-4'
+
+function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: SesionDePartida }) {
+  const { titulo, detalle } = textosDelResultado(resultado)
+
+  return (
+    <Capa titulo={titulo} alCancelar={sesion.verLaPartida}>
+      <h2 className={TITULO_DE_CAPA}>{titulo}</h2>
+      <p className="mt-2 font-cinzel text-sm tracking-[0.3em] text-oro uppercase">{detalle}</p>
+      <div className={ACCIONES_DE_CAPA}>
+        <button onClick={sesion.empezar} className={ACCION}>
+          Jugar otra vez
+        </button>
+        <button onClick={sesion.verLaPartida} className={ACCION}>
+          Ver la partida
+        </button>
+        <button onClick={sesion.deshacer} className={ACCION}>
+          Deshacer
+        </button>
+      </div>
+    </Capa>
+  )
+}
+
+function EleccionDePartida({ aviso, sesion }: { aviso: boolean; sesion: SesionDePartida }) {
+  return (
+    <Capa titulo="Nueva partida" alCancelar={sesion.volverALaPartida}>
+      <h2 className={TITULO_DE_CAPA}>Nueva partida</h2>
+      {aviso && <p className="mt-3 text-2xl italic">La partida en curso se perderá</p>}
+      <div className={ACCIONES_DE_CAPA}>
+        <button onClick={sesion.empezar} className={ACCION}>
+          Empezar
+        </button>
+        <button onClick={sesion.volverALaPartida} className={ACCION}>
+          Volver a la partida
+        </button>
+      </div>
+    </Capa>
+  )
+}
+
 export function App({ sesion }: { sesion: SesionDePartida }) {
   const estado = useSyncExternalStore(sesion.suscribir, sesion.obtenerEstado)
   const [arriba, abajo]: Bando[] = estado.girado ? ['w', 'b'] : ['b', 'w']
@@ -207,11 +271,16 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
           <button onClick={sesion.girar} className={ACCION}>
             Girar
           </button>
-          <button disabled className={ACCION}>
+          <button onClick={sesion.abrirEleccion} className={ACCION}>
             Nueva partida
           </button>
         </div>
       </main>
+      {estado.eleccion ? (
+        <EleccionDePartida aviso={estado.eleccion.aviso} sesion={sesion} />
+      ) : (
+        estado.pantallaFinal && estado.resultado && <PantallaFinal resultado={estado.resultado} sesion={sesion} />
+      )}
     </>
   )
 }

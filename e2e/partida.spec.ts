@@ -70,10 +70,123 @@ test.describe('Partida a dos bajo la ruta base', () => {
     await expect(page.getByText('Turno de las negras')).toBeVisible()
   })
 
-  test('el jaque mate termina la Partida y muestra su Resultado en el turno', async ({ page, isMobile }) => {
-    await tocador(page, isMobile).jugar('f2 f3', 'e7 e5', 'g2 g4', 'd8 h4')
+  const capa = (page: Page) => page.getByRole('dialog')
+  const boton = (page: Page, nombre: string) => page.getByRole('button', { name: nombre, exact: true })
+  const mateDelLoco = ['f2 f3', 'e7 e5', 'g2 g4', 'd8 h4']
+  const AVISO = 'La partida en curso se perderá'
 
+  test('una Partida hasta el jaque mate: pantalla final, «Ver la partida» y «Jugar otra vez»', async ({
+    page,
+    isMobile,
+  }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+    const arriba = async (locator: Locator) => (await locator.boundingBox())!.y
+
+    await pulsar(boton(page, 'Girar'))
+    await jugar(...mateDelLoco)
+
+    const final = capa(page)
+    await expect(final.getByRole('heading', { name: 'Jaque mate' })).toBeVisible()
+    await expect(final.getByText('ganan las negras')).toBeVisible()
+    await expect(final).not.toContainText('Partida')
+    for (const accion of await final.getByRole('button').all()) await expect(accion).toBeInViewport({ ratio: 1 })
+
+    await pulsar(boton(page, 'Ver la partida'))
+
+    await expect(capa(page)).toHaveCount(0)
     await expect(page.getByText('Jaque mate: ganan las negras')).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Historial' }).getByText('♛h4#')).toBeVisible()
+    await expect(boton(page, 'Deshacer')).toBeEnabled()
+    await expect(boton(page, 'Nueva partida')).toBeEnabled()
+
+    await pulsar(boton(page, 'Deshacer'))
+    await jugar('d8 h4')
+    await pulsar(boton(page, 'Jugar otra vez'))
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(page.getByText('Turno de las blancas')).toBeVisible()
+    await expect(page.getByRole('button', { name: /, (peón|torre|caballo|alfil|dama|rey) / })).toHaveCount(32)
+    await expect(page.getByRole('list', { name: 'Historial' }).getByRole('listitem')).toHaveCount(0)
+    expect(await arriba(casilla(page, 'a8'))).toBeLessThan(await arriba(casilla(page, 'a1')))
+  })
+
+  test('Deshacer desde la pantalla final retira solo la última Jugada', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar(...mateDelLoco)
+    await pulsar(capa(page).getByRole('button', { name: 'Deshacer' }))
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+    await expect(casilla(page, 'd8')).toHaveAccessibleName('d8, dama negra')
+    await expect(casilla(page, 'g4')).toHaveAccessibleName('g4, peón blanco')
+  })
+
+  test('Escape cierra la pantalla final como «Ver la partida»', async ({ page, isMobile }) => {
+    await tocador(page, isMobile).jugar(...mateDelLoco)
+    await expect(capa(page)).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(page.getByText('Jaque mate: ganan las negras')).toBeVisible()
+  })
+
+  test('«Nueva partida» avisa con una Partida en curso y solo la reemplaza al empezar', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar('e2 e4')
+    await pulsar(boton(page, 'Nueva partida'))
+
+    await expect(capa(page).getByText(AVISO)).toBeVisible()
+    await expect(capa(page)).not.toContainText('Partida')
+    for (const accion of await capa(page).getByRole('button').all()) await expect(accion).toBeInViewport({ ratio: 1 })
+
+    await pulsar(boton(page, 'Volver a la partida'))
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(casilla(page, 'e4')).toHaveAccessibleName('e4, peón blanco')
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+
+    await pulsar(boton(page, 'Nueva partida'))
+    await pulsar(boton(page, 'Empezar'))
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(casilla(page, 'e2')).toHaveAccessibleName('e2, peón blanco')
+    await expect(page.getByText('Turno de las blancas')).toBeVisible()
+  })
+
+  test('Escape cierra la capa de «Nueva partida» como «Volver a la partida»', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar('e2 e4')
+    await pulsar(boton(page, 'Nueva partida'))
+    await expect(capa(page)).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(casilla(page, 'e4')).toHaveAccessibleName('e4, peón blanco')
+  })
+
+  test('«Nueva partida» no avisa sin Jugadas', async ({ page, isMobile }) => {
+    const { pulsar } = tocador(page, isMobile)
+
+    await pulsar(boton(page, 'Nueva partida'))
+
+    await expect(boton(page, 'Empezar')).toBeVisible()
+    await expect(page.getByText(AVISO)).toHaveCount(0)
+  })
+
+  test('«Nueva partida» no avisa con la Partida terminada', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar(...mateDelLoco)
+    await pulsar(boton(page, 'Ver la partida'))
+    await pulsar(boton(page, 'Nueva partida'))
+
+    await expect(boton(page, 'Empezar')).toBeVisible()
+    await expect(page.getByText(AVISO)).toHaveCount(0)
   })
 
   test('la última Jugada queda marcada en su origen y su destino', async ({ page, isMobile }) => {

@@ -24,6 +24,8 @@ export type EstadoDePartida = {
   historial: string[]
   capturadas: Record<Bando, PieceSymbol[]>
   girado: boolean
+  pantallaFinal: boolean
+  eleccion: { aviso: boolean } | null
 }
 
 export type EventoDeJugada = {
@@ -48,6 +50,10 @@ export type SesionDePartida = {
   coronar(pieza: PieceSymbol): void
   deshacer(): void
   girar(): void
+  empezar(): void
+  verLaPartida(): void
+  abrirEleccion(): void
+  volverALaPartida(): void
   obtenerEstado(): EstadoDePartida
   suscribir(oyente: () => void): () => void
   alJugar(oyente: (evento: EventoDeJugada) => void): () => void
@@ -86,6 +92,8 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
   let girado = false
+  let finalCerrado = false
+  let eleccionAbierta = false
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
 
@@ -100,6 +108,7 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
     const ultima = jugadas[jugadas.length - 1]
     const capturadas: Record<Bando, PieceSymbol[]> = { w: [], b: [] }
     for (const { color, captured } of jugadas) if (captured) capturadas[color].push(captured)
+    const resultado = calcularResultado(chess)
     return {
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
@@ -108,10 +117,12 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
       destinos: [...destinos.values()],
       coronacion,
       ultimaJugada: ultima ? { desde: ultima.from, hasta: ultima.to } : null,
-      resultado: calcularResultado(chess),
+      resultado,
       historial: jugadas.map(({ san }) => conFiguritas(san)),
       capturadas,
       girado,
+      pantallaFinal: Boolean(resultado) && !finalCerrado,
+      eleccion: eleccionAbierta ? { aviso: jugadas.length > 0 && !resultado } : null,
     }
   }
 
@@ -161,11 +172,36 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
   }
 
   function deshacer() {
-    if (chess.undo()) publicar(null, null)
+    if (!chess.undo()) return
+    finalCerrado = false
+    publicar(null, null)
   }
 
   function girar() {
     girado = !girado
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
+  function empezar() {
+    chess.reset()
+    girado = false
+    finalCerrado = false
+    eleccionAbierta = false
+    publicar(null, null)
+  }
+
+  function verLaPartida() {
+    finalCerrado = true
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
+  function abrirEleccion() {
+    eleccionAbierta = true
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
+  function volverALaPartida() {
+    eleccionAbierta = false
     publicar(estado.seleccion, estado.coronacion)
   }
 
@@ -174,6 +210,10 @@ export function crearSesionDePartida(_dependencias: Dependencias, pgn?: string):
     coronar,
     deshacer,
     girar,
+    empezar,
+    verLaPartida,
+    abrirEleccion,
+    volverALaPartida,
     obtenerEstado: () => estado,
     suscribir(oyente) {
       oyentes.add(oyente)
