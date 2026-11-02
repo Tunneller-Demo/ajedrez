@@ -1,0 +1,358 @@
+@import 'tailwindcss' source('.');
+
+@theme {
+  --color-noche: #0a0810;
+  --color-oro: #d8b25c;
+  --color-oro-apagado: #a89a7c;
+  --color-marfil: #f3e8cf;
+  --color-peligro: #ff5a5f;
+  --color-violeta: #4a3f60;
+  --color-violeta-hondo: #3a3050;
+  --color-ebano: #1e1829;
+  --color-ebano-hondo: #15101e;
+  --color-foco: #785caa;
+  --font-cinzel: 'Cinzel', serif;
+  --font-cormorant: 'Cormorant Garamond', serif;
+}
+
+@custom-variant lateral {
+  @media (min-width: 860px) {
+    @slot;
+  }
+  @media (orientation: landscape) and (max-height: 500px) {
+    @slot;
+  }
+}
+@custom-variant compacta (@media (orientation: landscape) and (max-height: 500px));
+
+@layer base {
+  body {
+    background: var(--color-noche);
+    color: var(--color-marfil);
+    font-family: var(--font-cormorant);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-marfil);
+    outline-offset: 2px;
+  }
+}
+
+@property --foco-y {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 82%;
+}
+
+@property --tono-foco {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #785caa;
+}
+
+.foco {
+  --tono-foco: var(--color-foco);
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 75% 60% at 50% var(--foco-y),
+    color-mix(in srgb, var(--tono-foco) 34%, transparent),
+    transparent 70%
+  );
+  transition:
+    --foco-y 0.9s ease-in-out,
+    --tono-foco 0.6s ease-in-out;
+
+  @variant lateral {
+    background: radial-gradient(
+      ellipse 50% 60% at 34% var(--foco-y),
+      color-mix(in srgb, var(--tono-foco) 38%, transparent),
+      transparent 72%
+    );
+  }
+}
+
+.foco-en-jaque {
+  --tono-foco: var(--color-peligro);
+}
+
+/* La luz respira mientras la Máquina piensa. */
+.foco-piensa {
+  animation: respirar 4s ease-in-out infinite alternate;
+}
+
+/* --lado es el del tablero. En vertical descuenta título, Rival, turno, franjas, Historial y acciones. */
+.pantalla {
+  --franja: 1.5rem;
+  --lado: min(100vw, 100svh - 17.25rem);
+  position: relative;
+  display: grid;
+  grid-template: 'titulo' 'turno' 'escena' 'historial' 'acciones' / minmax(0, 1fr);
+  align-content: center;
+  gap: 0.25rem;
+  min-height: 100svh;
+  padding-block: 0.25rem;
+
+  @variant lateral {
+    --lado: min(100vw - 24rem, 100svh - 2 * var(--franja) - 2rem);
+    --alto: calc(var(--lado) + 2 * var(--franja));
+    grid-template:
+      'escena titulo' auto
+      'escena turno' auto
+      'escena historial' minmax(0, 1fr)
+      'escena acciones' auto
+      / auto minmax(0, 21rem);
+    justify-content: center;
+    gap: 0.5rem 2.5rem;
+    height: var(--alto);
+    min-height: 0;
+    padding-block: 0;
+    margin-block: calc((100svh - var(--alto)) / 2);
+  }
+
+  @variant compacta {
+    --franja: 1.125rem;
+    --lado: min(100vw - 14rem, 100svh - 2 * var(--franja) - 0.5rem);
+    column-gap: 1rem;
+  }
+}
+
+/* Pantalla final y elección de Partida: cubren toda la escena. */
+.capa {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  text-align: center;
+  color: var(--color-marfil);
+  background: radial-gradient(circle at 50% 40%, rgb(40 28 66 / 0.85), rgb(5 4 9 / 0.97) 62%);
+  backdrop-filter: blur(6px);
+}
+
+/* La elección deja ver el tablero atenuado detrás. */
+.capa-eleccion {
+  background: rgb(10 8 16 / 0.78);
+}
+
+/* Escena de una Jugada. --vuelo es lo que tarda la pieza; lo demás arranca al posarse. */
+.escena-de-jugada {
+  --vuelo: 620ms;
+  --posarse: 480ms;
+  --en-el-aire: drop-shadow(0 14px 10px rgb(0 0 0 / 0.8)) drop-shadow(0 0 10px rgb(216 178 92 / 0.8));
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.vuelo,
+.coronada,
+.disolucion,
+.polvo {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+}
+
+.vuelo {
+  z-index: 2;
+  animation: vuelo var(--vuelo) cubic-bezier(0.65, 0, 0.2, 1) both;
+
+  /* El peón se funde con la pieza elegida al posarse. */
+  &:has(+ .coronada) {
+    --al-posarse: 0;
+  }
+}
+
+.coronada {
+  z-index: 2;
+  animation: coronada var(--vuelo) both;
+}
+
+.disolucion {
+  animation: disolucion 750ms ease-in var(--posarse) both;
+}
+
+/* Contenedor para que las motas midan su recorrido en casillas (cqw). */
+.polvo {
+  z-index: 3;
+  container-type: inline-size;
+
+  i {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4px;
+    height: 4px;
+    background: #ffe7a8;
+    border-radius: 50%;
+    box-shadow: 0 0 8px 2px var(--color-oro);
+    opacity: 0;
+    animation: mota 900ms ease-out forwards;
+  }
+}
+
+.rayos {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+
+  line {
+    stroke: var(--color-peligro);
+    stroke-width: 0.045;
+    stroke-linecap: round;
+    stroke-dasharray: 1;
+    filter: drop-shadow(0 0 0.1px var(--color-peligro));
+    opacity: 0;
+    animation: rayo 800ms ease-out var(--posarse) forwards;
+  }
+}
+
+/* El movimiento va en la capa de la pantalla final: el rey y el título no retrasan las acciones. */
+.escena-de-mate {
+  animation: apagon 700ms ease-in both;
+}
+
+.rey-vencedor {
+  width: min(24vh, 11rem);
+  filter: drop-shadow(0 0 28px rgb(216 178 92 / 0.8));
+  animation: subir 1100ms cubic-bezier(0.2, 0.7, 0.2, 1) 300ms both;
+}
+
+.escena-de-mate h2 {
+  animation: titulo 1000ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
+}
+
+@keyframes respirar {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.7;
+  }
+}
+
+@keyframes vuelo {
+  0% {
+    transform: translate(calc(var(--dx) * 100%), calc(var(--dy) * 100%));
+    filter: none;
+  }
+  25% {
+    transform: translate(calc(var(--dx) * 100%), calc(var(--dy) * 100%)) scale(1.2);
+    filter: var(--en-el-aire);
+  }
+  80% {
+    transform: scale(1.2);
+    filter: var(--en-el-aire);
+  }
+  100% {
+    transform: none;
+    filter: none;
+    opacity: var(--al-posarse, 1);
+  }
+}
+
+@keyframes coronada {
+  0%,
+  80% {
+    opacity: 0;
+  }
+}
+
+@keyframes disolucion {
+  to {
+    opacity: 0;
+    filter: brightness(3.5) blur(5px);
+    scale: 1.3;
+  }
+}
+
+@keyframes mota {
+  from {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+  to {
+    opacity: 0;
+    transform: translate(calc(var(--x) * 100cqw), calc(var(--y) * 100cqw)) scale(0.2);
+  }
+}
+
+@keyframes rayo {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0.9;
+  }
+  60% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes apagon {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes subir {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.85);
+  }
+}
+
+@keyframes titulo {
+  from {
+    opacity: 0;
+    letter-spacing: 0.3em;
+    filter: blur(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foco {
+    transition: none;
+  }
+
+  .foco-piensa {
+    animation: none;
+    opacity: 0.5;
+  }
+
+  /* Sin la capa no hay animaciones que esperar y la Sesión de Partida recibe el aviso enseguida. */
+  .escena-de-jugada {
+    display: none;
+  }
+
+  /* Sin vuelo, la Jugada de la Máquina aparecería de golpe y pasaría inadvertida. */
+  .pieza-de-la-maquina {
+    animation: fundido 300ms ease-out;
+  }
+
+  .escena-de-mate,
+  .escena-de-mate h2,
+  .rey-vencedor {
+    animation: none;
+  }
+
+  @keyframes fundido {
+    from {
+      opacity: 0;
+    }
+  }
+}
