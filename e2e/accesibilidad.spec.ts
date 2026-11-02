@@ -10,17 +10,13 @@ const mateDelLoco = ['f2 f3', 'e7 e5', 'g2 g4', 'd8 h4']
 
 test.use({ contextOptions: { reducedMotion: 'reduce' } })
 
+// Todo arranca en la elección, resuelta con el teclado: empezar deja el foco en el tablero.
 test.beforeEach(async ({ page }) => {
   await page.goto('.')
+  await expect(boton(page, 'Dos personas')).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(casilla(page, 'e2')).toBeFocused()
 })
-
-// Justo tras cargar, el navegador puede perder la primera Tab: el foco sigue en body y se repite.
-async function entrarAlTablero(page: Page) {
-  await expect(async () => {
-    await page.keyboard.press('Tab')
-    await expect(casilla(page, 'e2')).toBeFocused({ timeout: 500 })
-  }).toPass()
-}
 
 // Lleva el foco con las flechas desde la casilla enfocada hasta el destino, con el tablero sin girar.
 async function irA(page: Page, destino: string) {
@@ -42,10 +38,19 @@ async function jugarConTeclado(page: Page, ...jugadas: string[]) {
   }
 }
 
+// El motor nunca llega a descargarse: la Máquina se queda pensando lo que dure la prueba.
+async function contraLaMaquinaQuePiensa(page: Page) {
+  await page.route('**/motor/*', () => {})
+  await boton(page, 'Nueva partida').click()
+  await boton(page, 'Contra la Máquina').click()
+  await boton(page, 'Empezar').click()
+  await casilla(page, 'e2').click()
+  await casilla(page, 'e4').click()
+  await expect(page.getByText('La Máquina piensa…')).toBeVisible()
+}
+
 test.describe('teclado', () => {
   test('una Partida entera con flechas y Enter, anunciada en la región aria-live', async ({ page }) => {
-    await entrarAlTablero(page)
-
     await jugarConTeclado(page, 'e2 e4')
     await expect(anuncios(page)).toHaveText('peón a e cuatro')
     await expect(casilla(page, 'e4')).toBeFocused()
@@ -62,7 +67,6 @@ test.describe('teclado', () => {
   })
 
   test('el jaque mate se anuncia y lleva a la pantalla final', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...mateDelLoco)
 
     await expect(anuncios(page)).toHaveText('dama a hache cuatro, jaque mate, ganan las negras')
@@ -70,14 +74,12 @@ test.describe('teclado', () => {
   })
 
   test('un jaque se anuncia como consecuencia de la Jugada', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4', 'f7 f5', 'd1 h5')
 
     await expect(anuncios(page)).toHaveText('dama a hache cinco, jaque')
   })
 
   test('el tablero es una sola parada de Tab, que recuerda la casilla', async ({ page }) => {
-    await entrarAlTablero(page)
     await irA(page, 'f3')
 
     await page.keyboard.press('Tab')
@@ -88,7 +90,6 @@ test.describe('teclado', () => {
   })
 
   test('las flechas no dan la vuelta en los bordes', async ({ page }) => {
-    await entrarAlTablero(page)
     await irA(page, 'a1')
 
     await page.keyboard.press('ArrowLeft')
@@ -112,7 +113,6 @@ test.describe('teclado', () => {
   })
 
   test('la Coronación se elige con flechas y Enter, y el foco vuelve al tablero', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...coronacion, 'b7 a8')
 
     await expect(boton(page, 'Dama')).toBeFocused()
@@ -129,7 +129,6 @@ test.describe('teclado', () => {
   })
 
   test('Escape cancela la Coronación y el foco vuelve al tablero', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...coronacion, 'b7 a8')
     await expect(boton(page, 'Dama')).toBeFocused()
 
@@ -142,7 +141,6 @@ test.describe('teclado', () => {
   })
 
   test('en la Coronación el foco no vuelve al tablero tapado y Ctrl+flecha no se intercepta', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...coronacion, 'b7 a8')
     await expect(boton(page, 'Dama')).toBeFocused()
 
@@ -154,7 +152,6 @@ test.describe('teclado', () => {
   })
 
   test('dos Jugadas seguidas con el mismo texto se anuncian las dos', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'd2 d4', 'd7 d5', 'c2 c4', 'e7 e6', 'c4 d5')
     await expect(anuncios(page)).toHaveText('peón captura peón en de cinco')
     const cambios = await anuncios(page).evaluateHandle((region) => {
@@ -172,12 +169,11 @@ test.describe('teclado', () => {
     await expect.poll(() => cambios.evaluate((vistos) => vistos.length)).toBeGreaterThan(0)
   })
 
-  test('Empezar lleva el foco al tablero', async ({ page }) => {
-    await entrarAlTablero(page)
+  test('empezar una Partida lleva el foco al tablero', async ({ page }) => {
     await jugarConTeclado(page, 'e2 e4')
     await boton(page, 'Nueva partida').focus()
     await page.keyboard.press('Enter')
-    await expect(boton(page, 'Empezar')).toBeFocused()
+    await expect(boton(page, 'Dos personas')).toBeFocused()
 
     await page.keyboard.press('Enter')
 
@@ -185,8 +181,25 @@ test.describe('teclado', () => {
     await expect(casilla(page, 'e4')).toBeFocused()
   })
 
+  test('la elección de Partida se recorre con el teclado', async ({ page }) => {
+    await boton(page, 'Nueva partida').focus()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Tab')
+    await expect(boton(page, 'Contra la Máquina')).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(boton(page, 'Empezar')).toBeFocused()
+
+    await page.keyboard.press('Shift+Tab')
+    await expect(page.getByRole('radio', { name: 'Medio' })).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('radio', { name: 'Difícil' })).toBeChecked()
+
+    await page.keyboard.press('Escape')
+    await expect(boton(page, 'Contra la Máquina')).toBeFocused()
+    await expect(capa(page)).toBeVisible()
+  })
+
   test('el diálogo de la pantalla final dice el Resultado completo', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...mateDelLoco)
 
     await expect(capa(page)).toHaveAccessibleName('Jaque mate')
@@ -194,7 +207,6 @@ test.describe('teclado', () => {
   })
 
   test('Deshacer conserva el foco al llegar al inicio y se anuncia', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4')
 
     const deshacer = boton(page, 'Deshacer')
@@ -211,7 +223,7 @@ test.describe('teclado', () => {
     const nueva = boton(page, 'Nueva partida')
     await nueva.focus()
     await page.keyboard.press('Enter')
-    await expect(boton(page, 'Empezar')).toBeFocused()
+    await expect(boton(page, 'Dos personas')).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(nueva).toBeFocused()
 
@@ -229,7 +241,6 @@ test.describe('teclado', () => {
   })
 
   test('cerrar la pantalla final tras recargar deja el foco en el tablero', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...mateDelLoco)
     await page.reload()
     await expect(capa(page)).toBeVisible()
@@ -245,7 +256,6 @@ test.describe('axe-core', () => {
   const analizar = async (page: Page) => (await new AxeBuilder({ page }).analyze()).violations
 
   test('sin infracciones en la pantalla de Partida', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4', 'f7 f5', 'e4 f5', 'g7 g5')
     await irA(page, 'f5')
     await page.keyboard.press('Enter')
@@ -254,7 +264,6 @@ test.describe('axe-core', () => {
   })
 
   test('sin infracciones en la pantalla final', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...mateDelLoco)
     await expect(capa(page)).toBeVisible()
 
@@ -262,10 +271,20 @@ test.describe('axe-core', () => {
   })
 
   test('sin infracciones en la elección de Partida', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4')
     await boton(page, 'Nueva partida').click()
     await expect(capa(page)).toBeVisible()
+
+    expect(await analizar(page)).toEqual([])
+
+    await boton(page, 'Contra la Máquina').click()
+    await expect(boton(page, 'Empezar')).toBeFocused()
+
+    expect(await analizar(page)).toEqual([])
+  })
+
+  test('sin infracciones en la Partida contra la Máquina, mientras piensa', async ({ page }) => {
+    await contraLaMaquinaQuePiensa(page)
 
     expect(await analizar(page)).toEqual([])
   })
@@ -337,7 +356,6 @@ test.describe('contraste AA', () => {
   })
 
   test('Historial y turno en jaque', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4', 'f7 f5', 'd1 h5')
     const historial = page.getByRole('list', { name: 'Historial' })
 
@@ -352,7 +370,6 @@ test.describe('contraste AA', () => {
     const coordenada = (nombre: string, texto: string) =>
       casilla(page, nombre).locator('..').getByText(texto, { exact: true })
 
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'a2 a4', 'h7 h6')
     await irA(page, 'b1')
     await page.keyboard.press('Enter')
@@ -376,7 +393,6 @@ test.describe('contraste AA', () => {
   })
 
   test('pantalla final', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, ...mateDelLoco)
     const final = capa(page)
     await expect(final).toBeVisible()
@@ -384,6 +400,7 @@ test.describe('contraste AA', () => {
     await exigir(NORMAL, {
       detalle: final.getByText('ganan las negras'),
       'jugar otra vez': boton(final, 'Jugar otra vez'),
+      'elegir otra': boton(final, 'Elegir otra partida'),
       ver: boton(final, 'Ver la partida'),
       deshacer: boton(final, 'Deshacer'),
     })
@@ -391,26 +408,46 @@ test.describe('contraste AA', () => {
   })
 
   test('elección de Partida', async ({ page }) => {
-    await entrarAlTablero(page)
     await jugarConTeclado(page, 'e2 e4')
     await boton(page, 'Nueva partida').click()
     const eleccion = capa(page)
     await expect(eleccion).toBeVisible()
 
     await exigir(NORMAL, {
-      empezar: boton(eleccion, 'Empezar'),
+      dos: boton(eleccion, 'Dos personas'),
+      maquina: boton(eleccion, 'Contra la Máquina'),
       volver: boton(eleccion, 'Volver a la partida'),
     })
     await exigir(GRANDE, {
       titulo: eleccion.getByRole('heading'),
       aviso: eleccion.getByText('La partida en curso se perderá'),
     })
+
+    await boton(eleccion, 'Contra la Máquina').click()
+
+    await exigir(NORMAL, {
+      bando: eleccion.getByText('Tu Bando'),
+      nivel: eleccion.getByText('Nivel'),
+      empezar: boton(eleccion, 'Empezar'),
+      volver: boton(eleccion, 'Volver'),
+    })
+    await exigir(GRANDE, {
+      blancas: eleccion.getByText('Blancas'),
+      'al azar': eleccion.getByText('Al azar'),
+      fácil: eleccion.getByText('Fácil'),
+      máximo: eleccion.getByText('Máximo'),
+    })
+  })
+
+  test('Rival y turno de la Partida contra la Máquina', async ({ page }) => {
+    await contraLaMaquinaQuePiensa(page)
+
+    await exigir(NORMAL, { rival: page.getByText('Contra la Máquina · Medio') })
+    await exigir(GRANDE, { piensa: page.getByText('La Máquina piensa…') })
   })
 })
 
 test('el foco del teclado se ve en el tablero', async ({ page }) => {
-  await page.keyboard.press('Tab')
-
   await expect(casilla(page, 'e2')).toHaveCSS('outline-style', 'solid')
   await expect(casilla(page, 'e2')).toHaveCSS('outline-width', '2px')
   await expect(casilla(page, 'e2')).toHaveCSS('outline-color', 'rgb(243, 232, 207)')

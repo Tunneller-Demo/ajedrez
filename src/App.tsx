@@ -8,6 +8,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react'
 import { flushSync } from 'react-dom'
 import type { PieceSymbol, Square } from 'chess.js'
@@ -16,11 +17,20 @@ import { urlDePieza } from './piezas'
 import {
   bandoContrario,
   type Bando,
+  type Eleccion,
   type EstadoDePartida,
   type Resultado,
   type SesionDePartida,
 } from './sesion/sesionDePartida'
-import { nombreDePieza, nombreDelBando, textoDeDeshacer, textoDeJugada, textosDelResultado } from './textos'
+import {
+  NIVELES,
+  nombreDePieza,
+  nombreDelBando,
+  textoDeDeshacer,
+  textoDeJugada,
+  textoDelRival,
+  textosDelResultado,
+} from './textos'
 
 const COLUMNAS = 'abcdefgh'
 const CASILLAS = [8, 7, 6, 5, 4, 3, 2, 1].flatMap((fila) => [...COLUMNAS].map((columna) => `${columna}${fila}` as Square))
@@ -33,6 +43,12 @@ const CORONACIONES: { tipo: PieceSymbol; etiqueta: string }[] = [
   { tipo: 'n', etiqueta: 'Caballo' },
 ]
 
+const BANDOS: { valor: Eleccion['bando']; etiqueta: string }[] = [
+  { valor: 'w', etiqueta: 'Blancas' },
+  { valor: 'b', etiqueta: 'Negras' },
+  { valor: 'azar', etiqueta: 'Al azar' },
+]
+
 // Filas y columnas de pantalla: el DOM sigue el orden visual, también con el tablero girado.
 const PASOS: Record<string, [fila: number, columna: number]> = {
   ArrowUp: [-1, 0],
@@ -41,11 +57,11 @@ const PASOS: Record<string, [fila: number, columna: number]> = {
   ArrowRight: [0, 1],
 }
 
-function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {
+function textoDelTurno({ resultado, turno, jaque, maquinaPiensa }: EstadoDePartida) {
   if (!resultado) {
     return (
       <>
-        Turno de las {nombreDelBando(turno)}
+        {maquinaPiensa ? 'La Máquina piensa…' : `Turno de las ${nombreDelBando(turno)}`}
         {jaque && <em className="text-peligro"> · Jaque</em>}
       </>
     )
@@ -75,6 +91,8 @@ function Casilla({
   const seleccionada = estado.seleccion === casilla
   const ultima = casilla === estado.ultimaJugada?.desde || casilla === estado.ultimaJugada?.hasta
   const enVuelo = casilla === estado.jugadaEnEscena?.hasta || casilla === estado.jugadaEnEscena?.torre?.hasta
+  const deLaMaquina =
+    casilla === estado.ultimaJugada?.hasta && estado.partida.rival === 'maquina' && pieza?.bando !== estado.partida.bando
   // a1 es oscura: la suma de columna (desde 0) y fila es impar en las oscuras.
   const clara = (COLUMNAS.indexOf(casilla[0]) + Number(casilla[1])) % 2 === 0
   const etiqueta = [casilla, pieza && nombreDePieza(pieza), destino && 'casilla válida'].filter(Boolean).join(', ')
@@ -104,7 +122,7 @@ function Casilla({
             src={urlDePieza(pieza.bando, pieza.tipo)}
             alt=""
             draggable={false}
-            className={`absolute inset-0 size-full select-none ${enVuelo ? 'invisible' : ''}`}
+            className={`absolute inset-0 size-full select-none ${enVuelo ? 'invisible' : ''} ${deLaMaquina ? 'pieza-de-la-maquina' : ''}`}
           />
         )}
         {destino && (
@@ -302,6 +320,8 @@ function BotonDeSilencio({ sesion }: { sesion: SesionDePartida }) {
 }
 
 // El efecto de diseño cierra el dialog antes de desmontarlo, para que el foco vuelva a donde estaba.
+// Escape se atiende en su tecla porque el navegador puede cerrar el dialog sin avisar con `cancel`,
+// y siempre se evita el cierre nativo: la elección de Partida no se puede cerrar sin Partida detrás.
 function Capa({
   titulo,
   descripcion,
@@ -320,15 +340,22 @@ function Capa({
   useLayoutEffect(() => {
     const abierto = dialogo.current
     abierto?.showModal()
+    abierto?.querySelector<HTMLElement>('[data-inicial]')?.focus()
     return () => abierto?.close()
   }, [])
+
+  function cancelar(evento: SyntheticEvent) {
+    evento.preventDefault()
+    alCancelar()
+  }
 
   return (
     <dialog
       ref={dialogo}
       aria-label={titulo}
       aria-describedby={descripcion}
-      onCancel={alCancelar}
+      onCancel={cancelar}
+      onKeyDown={(evento) => evento.key === 'Escape' && cancelar(evento)}
       className={`capa ${clase}`}
     >
       {children}
@@ -338,6 +365,7 @@ function Capa({
 
 const TITULO_DE_CAPA = 'text-5xl leading-none text-marfil italic lateral:text-7xl compacta:text-5xl'
 const ACCIONES_DE_CAPA = 'mt-4 flex w-full max-w-md flex-wrap justify-center gap-x-6 gap-y-1 px-4'
+const ACCION_DE_RIVAL = `${ACCION} underline-offset-4 aria-[current=true]:underline`
 
 function PantallaFinal({
   resultado,
@@ -364,8 +392,11 @@ function PantallaFinal({
         {detalle}
       </p>
       <div className={ACCIONES_DE_CAPA}>
-        <button onClick={sesion.empezar} className={ACCION}>
+        <button onClick={() => sesion.empezar()} className={ACCION}>
           Jugar otra vez
+        </button>
+        <button onClick={sesion.abrirEleccion} className={ACCION}>
+          Elegir otra partida
         </button>
         <button onClick={sesion.verLaPartida} className={ACCION}>
           Ver la partida
@@ -379,28 +410,113 @@ function PantallaFinal({
   )
 }
 
-function EleccionDePartida({
-  aviso,
-  empezar,
-  sesion,
+function Opciones<Valor extends string>({
+  titulo,
+  opciones,
+  valor,
+  alCambiar,
 }: {
-  aviso: boolean
-  empezar: () => void
-  sesion: SesionDePartida
+  titulo: string
+  opciones: { valor: Valor; etiqueta: string }[]
+  valor: Valor
+  alCambiar: (valor: Valor) => void
 }) {
   return (
-    <Capa titulo="Nueva partida" alCancelar={sesion.volverALaPartida}>
+    <fieldset className="mt-2 flex max-w-md flex-wrap justify-center gap-x-5 px-4">
+      <legend className="mx-auto font-cinzel text-xs tracking-[0.14em] text-oro uppercase">{titulo}</legend>
+      {opciones.map((opcion) => (
+        <label key={opcion.valor} className="flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 text-xl">
+          <input
+            type="radio"
+            name={titulo}
+            checked={opcion.valor === valor}
+            onChange={() => alCambiar(opcion.valor)}
+            className="size-6 accent-oro [color-scheme:dark]"
+          />
+          <span>{opcion.etiqueta}</span>
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+function EleccionDePartida({
+  eleccion,
+  preseleccion,
+  empezar,
+  sesion,
+  regionDeAnuncios,
+}: {
+  eleccion: NonNullable<EstadoDePartida['eleccion']>
+  preseleccion: Eleccion
+  empezar: (eleccion: Eleccion) => void
+  sesion: SesionDePartida
+  regionDeAnuncios: ReactNode
+}) {
+  const [paso, setPaso] = useState<'rival' | 'maquina'>('rival')
+  const [rival, setRival] = useState(preseleccion.rival)
+  const [bando, setBando] = useState(preseleccion.bando)
+  const [nivel, setNivel] = useState(preseleccion.nivel)
+
+  function irAlPaso(siguiente: typeof paso) {
+    flushSync(() => setPaso(siguiente))
+    document.querySelector<HTMLElement>('dialog [data-inicial]')?.focus()
+  }
+
+  function contraLaMaquina() {
+    sesion.prepararMaquina()
+    setRival('maquina')
+    irAlPaso('maquina')
+  }
+
+  return (
+    <Capa
+      titulo="Nueva partida"
+      alCancelar={paso === 'maquina' ? () => irAlPaso('rival') : sesion.volverALaPartida}
+      clase="capa-eleccion"
+    >
       <h2 className={TITULO_DE_CAPA}>Nueva partida</h2>
-      {aviso && <p className="mt-3 text-2xl italic">La partida en curso se perderá</p>}
-      <div className={ACCIONES_DE_CAPA}>
-        <button onClick={empezar} className={ACCION}>
-          Empezar
-        </button>
-        <button onClick={sesion.volverALaPartida} className={ACCION}>
-          Volver a la partida
-        </button>
-      </div>
+      {eleccion.aviso && <p className="mt-3 text-2xl italic">La partida en curso se perderá</p>}
+      {paso === 'rival' ? (
+        <div className={ACCIONES_DE_CAPA}>
+          <button
+            data-inicial={rival === 'persona' || undefined}
+            aria-current={rival === 'persona'}
+            onClick={() => empezar({ rival: 'persona', bando, nivel })}
+            className={ACCION_DE_RIVAL}
+          >
+            Dos personas
+          </button>
+          <button
+            data-inicial={rival === 'maquina' || undefined}
+            aria-current={rival === 'maquina'}
+            onClick={contraLaMaquina}
+            className={ACCION_DE_RIVAL}
+          >
+            Contra la Máquina
+          </button>
+          {eleccion.volver && (
+            <button onClick={sesion.volverALaPartida} className={ACCION}>
+              Volver a la partida
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <Opciones titulo="Tu Bando" opciones={BANDOS} valor={bando} alCambiar={setBando} />
+          <Opciones titulo="Nivel" opciones={NIVELES} valor={nivel} alCambiar={setNivel} />
+          <div className={ACCIONES_DE_CAPA}>
+            <button data-inicial onClick={() => empezar({ rival: 'maquina', bando, nivel })} className={ACCION}>
+              Empezar
+            </button>
+            <button onClick={() => irAlPaso('rival')} className={ACCION}>
+              Volver
+            </button>
+          </div>
+        </>
+      )}
       <BotonDeSilencio sesion={sesion} />
+      {regionDeAnuncios}
     </Capa>
   )
 }
@@ -410,6 +526,13 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
   const [anuncio, setAnuncio] = useState('')
   const [arriba, abajo]: Bando[] = estado.girado ? ['w', 'b'] : ['b', 'w']
   const luzAbajo = estado.turno === abajo
+  const rival = textoDelRival(estado.partida)
+  // La elección deja `main` inerte y la Máquina puede jugar detrás: los anuncios van dentro de la capa.
+  const regionDeAnuncios = (
+    <p role="status" aria-live="polite" className="sr-only">
+      {anuncio}
+    </p>
+  )
 
   // Un texto idéntico al anterior no cambiaría el DOM, y el lector de pantalla callaría.
   function anunciar(texto: string) {
@@ -426,8 +549,8 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
   }
 
   // Cerrar la capa devuelve el foco a «Nueva partida»; aquí la Partida empieza y el foco va al tablero.
-  function empezar() {
-    flushSync(sesion.empezar)
+  function empezar(eleccion: Eleccion) {
+    flushSync(() => sesion.empezar(eleccion))
     document.querySelector<HTMLElement>('[data-casilla][tabindex="0"]')?.focus()
   }
 
@@ -435,13 +558,20 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
     <>
       <div
         aria-hidden
-        className={`foco ${estado.jaque ? 'foco-en-jaque' : ''}`}
+        className={`foco ${estado.jaque ? 'foco-en-jaque' : ''} ${estado.maquinaPiensa ? 'foco-piensa' : ''}`}
         style={{ '--foco-y': luzAbajo ? '82%' : '18%' } as CSSProperties}
       />
       <main className="pantalla">
-        <h1 className="text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase [grid-area:titulo] lateral:text-left compacta:sr-only">
-          Ajedrez de Gala
-        </h1>
+        <div className="[grid-area:titulo] compacta:pr-12">
+          <h1 className="text-center font-cinzel text-sm font-medium tracking-[0.5em] text-oro uppercase lateral:text-left compacta:sr-only">
+            Ajedrez de Gala
+          </h1>
+          {rival && (
+            <p className="text-center font-cinzel text-xs leading-5 tracking-[0.14em] text-oro uppercase lateral:text-left">
+              {rival}
+            </p>
+          )}
+        </div>
         <p className="px-2 text-center text-3xl leading-tight italic [grid-area:turno] lateral:border-b lateral:border-oro/40 lateral:px-0 lateral:pb-4 lateral:text-left lateral:text-5xl compacta:pr-12 compacta:pb-1 compacta:text-2xl">
           {textoDelTurno(estado)}
         </p>
@@ -451,9 +581,7 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         <span id="ayuda-del-tablero" hidden>
           Muévete con las flechas y selecciona con Enter
         </span>
-        <p role="status" aria-live="polite" className="sr-only">
-          {anuncio}
-        </p>
+        {!estado.eleccion && regionDeAnuncios}
         <div className="mx-auto w-(--lado) [grid-area:escena]">
           <Capturadas bando={arriba} estado={estado} />
           <Tablero
@@ -478,7 +606,13 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         <BotonDeSilencio sesion={sesion} />
       </main>
       {estado.eleccion ? (
-        <EleccionDePartida aviso={estado.eleccion.aviso} empezar={empezar} sesion={sesion} />
+        <EleccionDePartida
+          eleccion={estado.eleccion}
+          preseleccion={estado.preseleccion}
+          empezar={empezar}
+          sesion={sesion}
+          regionDeAnuncios={regionDeAnuncios}
+        />
       ) : (
         estado.pantallaFinal && estado.resultado && <PantallaFinal resultado={estado.resultado} deshacer={deshacer} sesion={sesion} />
       )}

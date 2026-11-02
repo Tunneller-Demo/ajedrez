@@ -1,6 +1,14 @@
 // Sesión de Partida: dueña de la lógica, sin React ni navegador. La interfaz solo envía acciones y lee estado y eventos.
 import { Chess, type Color, type Move, type PieceSymbol, type Square } from 'chess.js'
-import { guardarPartida, guardarSilencio, restaurarPartida, restaurarSilencio } from './guardado'
+import type { MotorDeMaquina, Nivel } from '../maquina/motor'
+import {
+  guardarEleccion,
+  guardarPartida,
+  guardarSilencio,
+  restaurarEleccion,
+  restaurarPartida,
+  restaurarSilencio,
+} from './guardado'
 
 export type Bando = Color
 export type Pieza = { casilla: Square; tipo: PieceSymbol; bando: Bando }
@@ -13,7 +21,17 @@ export type Resultado =
   | { tipo: 'ahogado' }
   | { tipo: 'tablas'; motivo: '50-jugadas' | 'triple-repeticion' | 'material-insuficiente' }
 
+export type Rival = 'persona' | 'maquina'
+
+// `bando` es el de la persona: la Máquina lleva el contrario.
+export type DatosDePartida = { rival: 'persona'; bando: null; nivel: null } | { rival: 'maquina'; bando: Bando; nivel: Nivel }
+
+export type Eleccion = { rival: Rival; bando: Bando | 'azar'; nivel: Nivel }
+
 export type EstadoDePartida = {
+  partida: DatosDePartida
+  maquinaPiensa: boolean
+  preseleccion: Eleccion
   piezas: Pieza[]
   turno: Bando
   jaque: boolean
@@ -26,7 +44,7 @@ export type EstadoDePartida = {
   capturadas: Record<Bando, PieceSymbol[]>
   girado: boolean
   pantallaFinal: boolean
-  eleccion: { aviso: boolean } | null
+  eleccion: { aviso: boolean; volver: boolean } | null
   jugadaEnEscena: EventoDeJugada | null
   silencio: boolean
 }
@@ -46,18 +64,21 @@ export type EventoDeJugada = {
   rayos: { desde: Square; hasta: Square }[]
   resultado: Resultado | null
   efecto: Efecto
+  deLaMaquina: boolean
 }
 
 export type Almacen = { leer(clave: string): string | null; escribir(clave: string, valor: string): void }
-export type Reloj = { ahora(): number }
-export type Dependencias = { almacen: Almacen; reloj: Reloj }
+export type Reloj = { esperar(ms: number): Promise<void> }
+export type Dependencias = { almacen: Almacen; reloj: Reloj; motor: MotorDeMaquina; azar: () => number }
 
 export type SesionDePartida = {
   tocarCasilla(casilla: Square): void
   coronar(pieza: PieceSymbol): void
   deshacer(): void
   girar(): void
-  empezar(): void
+  // Sin elección repite la preselección.
+  empezar(eleccion?: Eleccion): void
+  prepararMaquina(): void
   verLaPartida(): void
   abrirEleccion(): void
   volverALaPartida(): void
@@ -69,6 +90,11 @@ export type SesionDePartida = {
 }
 
 export const bandoContrario = (bando: Bando): Bando => (bando === 'w' ? 'b' : 'w')
+
+const A_DOS: DatosDePartida = { rival: 'persona', bando: null, nivel: null }
+
+// Tiempo mínimo que la Máquina se toma antes de jugar, aunque el motor responda enseguida.
+const PAUSA_DE_LA_MAQUINA = 900
 
 const FIGURITAS: Record<string, string> = { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞' }
 
@@ -110,18 +136,25 @@ function efectoDeJugada(resultado: Resultado | null, jaque: boolean, captura: bo
   return captura ? 'capturar' : 'mover'
 }
 
-export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida {
-  const chess = restaurarPartida(almacen)
+export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependencias): SesionDePartida {
+  const restaurada = restaurarPartida(almacen)
+  const chess = restaurada ?? new Chess()
 
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
+  let hayPartida = restaurada !== null
+  let partida = A_DOS
+  let preseleccion = restaurarEleccion(almacen)
   let girado = false
   let finalCerrado = false
-  let eleccionAbierta = false
+  let eleccionAbierta = !restaurada
   let jugadaEnEscena: EventoDeJugada | null = null
   let silencio = restaurarSilencio(almacen)
+  // Cada pedido al motor lleva su número: una respuesta de un turno ya cortado se descarta.
+  let vigencia = 0
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
+  const juegaLaMaquina = (bando: Bando) => partida.rival === 'maquina' && bando !== partida.bando
 
   function leerEstado(seleccion: Square | null, coronacion: Coronacion | null): EstadoDePartida {
     const destinos = new Map<Square, Destino>()
@@ -136,6 +169,9 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     for (const { color, captured } of jugadas) if (captured) capturadas[color].push(captured)
     const resultado = calcularResultado(chess)
     return {
+      partida,
+      maquinaPiensa: juegaLaMaquina(chess.turn()) && !resultado,
+      preseleccion,
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
       jaque: chess.isCheck(),
@@ -148,7 +184,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       capturadas,
       girado,
       pantallaFinal: Boolean(resultado) && !finalCerrado && !jugadaEnEscena,
-      eleccion: eleccionAbierta ? { aviso: jugadas.length > 0 && !resultado } : null,
+      eleccion: eleccionAbierta ? { aviso: jugadas.length > 0 && !resultado, volver: hayPartida } : null,
       jugadaEnEscena,
       silencio,
     }
@@ -163,7 +199,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
 
   function jugar({ from, to, promotion }: Move) {
     const jugada = chess.move({ from, to, promotion })
-    guardarPartida(almacen, chess)
+    guardarPartida(almacen, chess, partida)
     const jaque = chess.isCheck()
     const resultado = calcularResultado(chess)
     const evento: EventoDeJugada = {
@@ -179,14 +215,36 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
       rayos: rayosDelJaque(chess),
       resultado,
       efecto: efectoDeJugada(resultado, jaque, Boolean(jugada.captured)),
+      deLaMaquina: juegaLaMaquina(jugada.color),
     }
     jugadaEnEscena = evento
     publicar(null, null)
     oyentesDeJugada.forEach((oyente) => oyente(evento))
   }
 
+  function cancelarTurno() {
+    vigencia++
+    motor.cancelar()
+  }
+
+  // El motor puede tardar menos que la pausa, o responder algo que no se pueda jugar: su Jugada se valida aquí.
+  function turnoDeLaMaquina() {
+    if (partida.rival !== 'maquina' || chess.turn() === partida.bando || calcularResultado(chess)) return
+    const pedido = ++vigencia
+    Promise.all([motor.pedirJugada(chess.fen(), partida.nivel), reloj.esperar(PAUSA_DE_LA_MAQUINA)])
+      .then(([respuesta]) => {
+        if (pedido !== vigencia || !respuesta) return
+        const { desde, hasta, coronacion } = respuesta
+        const legal = jugadasDesde(desde).find((j) => j.to === hasta && (j.promotion ?? null) === coronacion)
+        if (legal) jugar(legal)
+      })
+      .catch(() => {
+        // Un fallo del motor deja a la Máquina pensando.
+      })
+  }
+
   function tocarCasilla(casilla: Square) {
-    if (estado.resultado) return
+    if (estado.resultado || estado.maquinaPiensa) return
     if (estado.coronacion) return publicar(null, null)
 
     const { seleccion } = estado
@@ -206,11 +264,14 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   }
 
   function deshacer() {
-    if (!chess.undo()) return
-    guardarPartida(almacen, chess)
+    if (!chess.history().length) return
+    cancelarTurno()
+    chess.undo()
+    guardarPartida(almacen, chess, partida)
     finalCerrado = false
     jugadaEnEscena = null
     publicar(null, null)
+    turnoDeLaMaquina()
   }
 
   function girar() {
@@ -218,14 +279,31 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     publicar(estado.seleccion, estado.coronacion)
   }
 
-  function empezar() {
+  function sortear({ rival, bando, nivel }: Eleccion): DatosDePartida {
+    if (rival === 'persona') return A_DOS
+    return { rival, nivel, bando: bando === 'azar' ? (azar() < 0.5 ? 'w' : 'b') : bando }
+  }
+
+  function empezar(eleccion = preseleccion) {
+    cancelarTurno()
+    preseleccion = eleccion
+    guardarEleccion(almacen, eleccion)
+    partida = sortear(eleccion)
     chess.reset()
-    guardarPartida(almacen, chess)
-    girado = false
+    guardarPartida(almacen, chess, partida)
+    hayPartida = true
+    girado = partida.bando === 'b'
     finalCerrado = false
     eleccionAbierta = false
     jugadaEnEscena = null
     publicar(null, null)
+    turnoDeLaMaquina()
+  }
+
+  function prepararMaquina() {
+    motor.preparar().catch(() => {
+      // El fallo se ve al pedir la primera Jugada.
+    })
   }
 
   function verLaPartida() {
@@ -239,14 +317,17 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
   }
 
   function volverALaPartida() {
+    if (!hayPartida) return
     eleccionAbierta = false
     publicar(estado.seleccion, estado.coronacion)
   }
 
+  // La Máquina no empieza a pensar hasta que la Jugada de la persona se ha posado.
   function terminarAnimacion() {
     if (!jugadaEnEscena) return
     jugadaEnEscena = null
     publicar(estado.seleccion, estado.coronacion)
+    turnoDeLaMaquina()
   }
 
   function alternarSilencio() {
@@ -261,6 +342,7 @@ export function crearSesionDePartida({ almacen }: Dependencias): SesionDePartida
     deshacer,
     girar,
     empezar,
+    prepararMaquina,
     verLaPartida,
     abrirEleccion,
     volverALaPartida,

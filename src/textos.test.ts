@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { textoDeDeshacer, textoDeJugada } from './textos'
+import { textoDeDeshacer, textoDeJugada, textoDelRival } from './textos'
 import type { EventoDeJugada } from './sesion/sesionDePartida'
 
 const jugada = (cambios: Partial<EventoDeJugada>): EventoDeJugada => ({
@@ -15,6 +15,7 @@ const jugada = (cambios: Partial<EventoDeJugada>): EventoDeJugada => ({
   rayos: [],
   resultado: null,
   efecto: 'mover',
+  deLaMaquina: false,
   ...cambios,
 })
 
@@ -72,6 +73,39 @@ describe('texto hablado de una Jugada', () => {
     expect(textoDeJugada(jugada({ resultado: { tipo: 'tablas', motivo: 'triple-repeticion' } }))).toBe(
       'caballo a efe tres, tablas por triple repetición',
     )
+  })
+})
+
+describe('texto hablado de una Jugada de la Máquina', () => {
+  it('la nombra y conserva la consecuencia', () => {
+    expect(textoDeJugada(jugada({ deLaMaquina: true, jaque: true }))).toBe('La Máquina juega caballo a efe tres, jaque')
+  })
+
+  it('une la captura a la frase', () => {
+    const captura = jugada({ deLaMaquina: true, pieza: 'b', hasta: 'f6', captura: { pieza: 'n', casilla: 'f6' } })
+
+    expect(textoDeJugada(captura)).toBe('La Máquina juega alfil y captura caballo en efe seis')
+  })
+
+  it('nombra el enroque', () => {
+    const enroque = jugada({ deLaMaquina: true, pieza: 'k', hasta: 'g1', torre: { desde: 'h1', hasta: 'f1' } })
+
+    expect(textoDeJugada(enroque)).toBe('La Máquina juega enroque corto')
+  })
+})
+
+describe('texto del Rival', () => {
+  it.each([
+    ['facil', 'Fácil'],
+    ['medio', 'Medio'],
+    ['dificil', 'Difícil'],
+    ['maximo', 'Máximo'],
+  ] as const)('contra la Máquina en %s dice su Nivel', (nivel, etiqueta) => {
+    expect(textoDelRival({ rival: 'maquina', bando: 'w', nivel })).toBe(`Contra la Máquina · ${etiqueta}`)
+  })
+
+  it('a dos no dice nada', () => {
+    expect(textoDelRival({ rival: 'persona', bando: null, nivel: null })).toBeNull()
   })
 })
 

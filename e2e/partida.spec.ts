@@ -2,9 +2,15 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const casilla = (page: Page, nombre: string) => page.getByRole('button', { name: new RegExp(`^${nombre}(,|$)`) })
 
+async function abrirPartidaADos(page: Page) {
+  await page.goto('.')
+  await page.getByRole('button', { name: 'Dos personas', exact: true }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+}
+
 test.describe('Partida a dos bajo la ruta base', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('.')
+    await abrirPartidaADos(page)
   })
 
   function tocador(page: Page, isMobile: boolean) {
@@ -172,7 +178,7 @@ test.describe('Partida a dos bajo la ruta base', () => {
     await expect(page.getByText('Turno de las negras')).toBeVisible()
 
     await pulsar(boton(page, 'Nueva partida'))
-    await pulsar(boton(page, 'Empezar'))
+    await pulsar(boton(page, 'Dos personas'))
 
     await expect(capa(page)).toHaveCount(0)
     await expect(casilla(page, 'e2')).toHaveAccessibleName('e2, peón blanco')
@@ -197,7 +203,7 @@ test.describe('Partida a dos bajo la ruta base', () => {
 
     await pulsar(boton(page, 'Nueva partida'))
 
-    await expect(boton(page, 'Empezar')).toBeVisible()
+    await expect(boton(page, 'Dos personas')).toBeVisible()
     await expect(page.getByText(AVISO)).toHaveCount(0)
   })
 
@@ -208,7 +214,17 @@ test.describe('Partida a dos bajo la ruta base', () => {
     await pulsar(boton(page, 'Ver la partida'))
     await pulsar(boton(page, 'Nueva partida'))
 
-    await expect(boton(page, 'Empezar')).toBeVisible()
+    await expect(boton(page, 'Dos personas')).toBeVisible()
+    await expect(page.getByText(AVISO)).toHaveCount(0)
+  })
+
+  test('«Elegir otra partida» lleva de la pantalla final a la elección, sin aviso', async ({ page, isMobile }) => {
+    const { jugar, pulsar } = tocador(page, isMobile)
+
+    await jugar(...mateDelLoco)
+    await pulsar(boton(page, 'Elegir otra partida'))
+
+    await expect(boton(page, 'Dos personas')).toBeFocused()
     await expect(page.getByText(AVISO)).toHaveCount(0)
   })
 
@@ -576,7 +592,7 @@ test.describe('sonido', () => {
         }
       }
     })
-    await page.goto('.')
+    await abrirPartidaADos(page)
   })
 
   const audio = (page: Page) =>
@@ -584,6 +600,8 @@ test.describe('sonido', () => {
   const silencio = (ambito: Page | Locator) => ambito.getByRole('button', { name: 'Silencio' })
 
   test('no hay contexto de audio antes de la primera interacción', async ({ page }) => {
+    // La elección ya es una interacción: recargar recupera la Partida y empieza de cero.
+    await page.reload()
     await expect(page.getByText('Turno de las blancas')).toBeVisible()
     await page.evaluate(() => new Promise((listo) => setTimeout(listo, 200)))
     expect((await audio(page)).contextos).toBe(0)
@@ -709,7 +727,7 @@ test('la escena se sirve entera desde la app, sin terceros', async ({ page, base
   const peticiones: string[] = []
   page.on('request', (peticion) => peticiones.push(peticion.url()))
 
-  await page.goto('.')
+  await abrirPartidaADos(page)
   await page.evaluate(() => document.fonts.ready)
 
   const piezas = page.getByRole('main').locator('img')

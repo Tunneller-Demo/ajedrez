@@ -1,6 +1,7 @@
 // Lo que la interfaz dice de la Partida, en pantalla y al lector de pantalla.
 import type { PieceSymbol, Square } from 'chess.js'
-import type { Bando, EventoDeJugada, Pieza, Resultado } from './sesion/sesionDePartida'
+import type { Nivel } from './maquina/motor'
+import type { Bando, DatosDePartida, EventoDeJugada, Pieza, Resultado } from './sesion/sesionDePartida'
 
 const NOMBRES: Record<PieceSymbol, { nombre: string; femenino: boolean }> = {
   k: { nombre: 'rey', femenino: false },
@@ -42,11 +43,12 @@ export function textosDelResultado(resultado: Resultado) {
   return { titulo: 'Tablas', detalle: 'por material insuficiente' }
 }
 
-function movimientoHablado({ pieza, hasta, captura, torre }: EventoDeJugada) {
+function movimientoHablado({ pieza, hasta, captura, torre, deLaMaquina }: EventoDeJugada) {
   if (torre) return torre.hasta[0] === 'f' ? 'enroque corto' : 'enroque largo'
   if (!captura) return `${NOMBRES[pieza].nombre} a ${casillaHablada(hasta)}`
   const alPaso = captura.casilla === hasta ? '' : ' al paso'
-  return `${NOMBRES[pieza].nombre} captura ${NOMBRES[captura.pieza].nombre}${alPaso} en ${casillaHablada(hasta)}`
+  const verbo = deLaMaquina ? 'y captura' : 'captura'
+  return `${NOMBRES[pieza].nombre} ${verbo} ${NOMBRES[captura.pieza].nombre}${alPaso} en ${casillaHablada(hasta)}`
 }
 
 function consecuenciaHablada({ jaque, resultado }: EventoDeJugada) {
@@ -58,7 +60,20 @@ function consecuenciaHablada({ jaque, resultado }: EventoDeJugada) {
 
 export function textoDeJugada(jugada: EventoDeJugada) {
   const corona = jugada.coronacion && `corona ${NOMBRES[jugada.coronacion].nombre}`
-  return [movimientoHablado(jugada), corona, consecuenciaHablada(jugada)].filter(Boolean).join(', ')
+  const texto = [movimientoHablado(jugada), corona, consecuenciaHablada(jugada)].filter(Boolean).join(', ')
+  return jugada.deLaMaquina ? `La Máquina juega ${texto}` : texto
+}
+
+export const NIVELES: { valor: Nivel; etiqueta: string }[] = [
+  { valor: 'facil', etiqueta: 'Fácil' },
+  { valor: 'medio', etiqueta: 'Medio' },
+  { valor: 'dificil', etiqueta: 'Difícil' },
+  { valor: 'maximo', etiqueta: 'Máximo' },
+]
+
+export function textoDelRival({ rival, nivel }: DatosDePartida) {
+  if (rival === 'persona') return null
+  return `Contra la Máquina · ${NIVELES.find(({ valor }) => valor === nivel)?.etiqueta}`
 }
 
 export const textoDeDeshacer = (turno: Bando) => `Jugada deshecha, juegan las ${nombreDelBando(turno)}`

@@ -1,15 +1,21 @@
 // Guardado: serializa con pgn() y restaura con loadPgn(), nunca por FEN, para conservar Historial, Deshacer y triple repetición.
 import { Chess } from 'chess.js'
-import type { Almacen } from './sesionDePartida'
+import type { Nivel } from '../maquina/motor'
+import type { Almacen, DatosDePartida, Eleccion } from './sesionDePartida'
 
-// Rival, Bando y Nivel solo reservan su lugar hasta que llegue la Máquina.
-type Guardado = { pgn: string; rival: 'persona'; bando: null; nivel: null }
+type Guardado = { pgn: string } & DatosDePartida
 
 const CLAVE_DE_PARTIDA = 'ajedrez-de-gala:partida'
 const CLAVE_DE_SILENCIO = 'ajedrez-de-gala:silencio'
+const CLAVE_DE_ELECCION = 'ajedrez-de-gala:eleccion'
 
-export function guardarPartida(almacen: Almacen, chess: Chess) {
-  const guardado: Guardado = { pgn: chess.pgn(), rival: 'persona', bando: null, nivel: null }
+const ELECCION_POR_DEFECTO: Eleccion = { rival: 'persona', bando: 'w', nivel: 'medio' }
+const RIVALES: Eleccion['rival'][] = ['persona', 'maquina']
+const BANDOS: Eleccion['bando'][] = ['w', 'b', 'azar']
+const NIVELES: Nivel[] = ['facil', 'medio', 'dificil', 'maximo']
+
+export function guardarPartida(almacen: Almacen, chess: Chess, partida: DatosDePartida) {
+  const guardado: Guardado = { pgn: chess.pgn(), ...partida }
   try {
     almacen.escribir(CLAVE_DE_PARTIDA, JSON.stringify(guardado))
   } catch {
@@ -19,14 +25,15 @@ export function guardarPartida(almacen: Almacen, chess: Chess) {
 
 // loadPgn puede fallar tras aplicar parte de las Jugadas: un guardado dañado cuenta como si no existiera.
 export function restaurarPartida(almacen: Almacen) {
-  const chess = new Chess()
   try {
     const texto = almacen.leer(CLAVE_DE_PARTIDA)
-    if (texto) chess.loadPgn((JSON.parse(texto) as Guardado).pgn)
+    if (!texto) return null
+    const chess = new Chess()
+    chess.loadPgn((JSON.parse(texto) as Guardado).pgn)
+    return chess
   } catch {
-    chess.reset()
+    return null
   }
-  return chess
 }
 
 export function guardarSilencio(almacen: Almacen, silencio: boolean) {
@@ -43,4 +50,22 @@ export function restaurarSilencio(almacen: Almacen) {
   } catch {
     return false
   }
+}
+
+export function guardarEleccion(almacen: Almacen, eleccion: Eleccion) {
+  try {
+    almacen.escribir(CLAVE_DE_ELECCION, JSON.stringify(eleccion))
+  } catch {
+    // Sin almacén la preselección dura lo que la página.
+  }
+}
+
+export function restaurarEleccion(almacen: Almacen) {
+  try {
+    const { rival, bando, nivel } = JSON.parse(almacen.leer(CLAVE_DE_ELECCION) ?? 'null') as Eleccion
+    if (RIVALES.includes(rival) && BANDOS.includes(bando) && NIVELES.includes(nivel)) return { rival, bando, nivel }
+  } catch {
+    // Una preselección ilegible, o que no existe, cuenta como la de por defecto.
+  }
+  return ELECCION_POR_DEFECTO
 }

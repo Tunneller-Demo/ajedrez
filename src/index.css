@@ -77,10 +77,15 @@
   --tono-foco: var(--color-peligro);
 }
 
-/* --lado es el del tablero. En vertical descuenta título, turno, franjas, Historial y acciones. */
+/* La luz respira mientras la Máquina piensa. */
+.foco-piensa {
+  animation: respirar 4s ease-in-out infinite alternate;
+}
+
+/* --lado es el del tablero. En vertical descuenta título, Rival, turno, franjas, Historial y acciones. */
 .pantalla {
   --franja: 1.5rem;
-  --lado: min(100vw, 100svh - 16rem);
+  --lado: min(100vw, 100svh - 17.25rem);
   position: relative;
   display: grid;
   grid-template: 'titulo' 'turno' 'escena' 'historial' 'acciones' / minmax(0, 1fr);
@@ -129,6 +134,11 @@
   color: var(--color-marfil);
   background: radial-gradient(circle at 50% 40%, rgb(40 28 66 / 0.85), rgb(5 4 9 / 0.97) 62%);
   backdrop-filter: blur(6px);
+}
+
+/* La elección deja ver el tablero atenuado detrás. */
+.capa-eleccion {
+  background: rgb(10 8 16 / 0.78);
 }
 
 /* Escena de una Jugada. --vuelo es lo que tarda la pieza; lo demás arranca al posarse. */
@@ -223,6 +233,15 @@
   animation: titulo 1000ms cubic-bezier(0.2, 0.7, 0.2, 1) 500ms both;
 }
 
+@keyframes respirar {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.7;
+  }
+}
+
 @keyframes vuelo {
   0% {
     transform: translate(calc(var(--dx) * 100%), calc(var(--dy) * 100%));
@@ -310,14 +329,30 @@
     transition: none;
   }
 
+  .foco-piensa {
+    animation: none;
+    opacity: 0.5;
+  }
+
   /* Sin la capa no hay animaciones que esperar y la Sesión de Partida recibe el aviso enseguida. */
   .escena-de-jugada {
     display: none;
+  }
+
+  /* Sin vuelo, la Jugada de la Máquina aparecería de golpe y pasaría inadvertida. */
+  .pieza-de-la-maquina {
+    animation: fundido 300ms ease-out;
   }
 
   .escena-de-mate,
   .escena-de-mate h2,
   .rey-vencedor {
     animation: none;
+  }
+
+  @keyframes fundido {
+    from {
+      opacity: 0;
+    }
   }
 }

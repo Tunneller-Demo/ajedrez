@@ -14,7 +14,7 @@ declare global {
 const POSICION_QUE_SE_CUELGA = '3r3k/pbq1rpp1/1p2pNnp/2p1P2Q/2BP2R1/2P4R/P4PPP/6K1 b - - 3 24'
 const CORONACION = '8/P6k/8/8/8/8/8/K7 w - - 0 1'
 
-// Hasta que la Máquina entre en la interfaz, el bundle no incluye el cliente: se compila aparte y corre en la página.
+// El bundle no expone el cliente: se compila aparte y corre en la página, para probarlo aislado de la interfaz.
 async function cargarCliente(page: Page, baseURL: string) {
   const fuente = readFileSync('src/maquina/motor.ts', 'utf8')
   const define = { 'import.meta.env.BASE_URL': JSON.stringify(new URL(baseURL).pathname) }
