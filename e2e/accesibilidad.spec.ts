@@ -417,6 +417,7 @@ test.describe('contraste AA', () => {
       dos: boton(eleccion, 'Dos personas'),
       maquina: boton(eleccion, 'Contra la Máquina'),
       volver: boton(eleccion, 'Volver a la partida'),
+      creditos: eleccion.getByRole('link', { name: /^Créditos/ }),
     })
     await exigir(GRANDE, {
       titulo: eleccion.getByRole('heading'),

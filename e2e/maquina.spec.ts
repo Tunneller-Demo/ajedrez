@@ -67,7 +67,7 @@ test.describe('elección de Partida', () => {
 
   test('todo cabe en pantalla en ambos pasos', async ({ page }) => {
     const enPantalla = async () => {
-      for (const elemento of await capa(page).locator('button, input').all()) {
+      for (const elemento of await capa(page).locator('button, input, a').all()) {
         await expect(elemento).toBeInViewport({ ratio: 1 })
       }
     }

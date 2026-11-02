@@ -501,29 +501,40 @@ function EleccionDePartida({
       <h2 className={TITULO_DE_CAPA}>Nueva partida</h2>
       {eleccion.aviso && <p className="mt-3 text-2xl italic">La partida en curso se perderá</p>}
       {paso === 'rival' ? (
-        <div className={ACCIONES_DE_CAPA}>
-          <button
-            data-inicial={rival === 'persona' || undefined}
-            aria-current={rival === 'persona'}
-            onClick={() => empezar({ rival: 'persona', bando, nivel })}
-            className={ACCION_DE_RIVAL}
-          >
-            Dos personas
-          </button>
-          <button
-            data-inicial={rival === 'maquina' || undefined}
-            aria-current={rival === 'maquina'}
-            onClick={contraLaMaquina}
-            className={ACCION_DE_RIVAL}
-          >
-            Contra la Máquina
-          </button>
-          {eleccion.volver && (
-            <button onClick={sesion.volverALaPartida} className={ACCION}>
-              Volver a la partida
+        <>
+          <div className={ACCIONES_DE_CAPA}>
+            <button
+              data-inicial={rival === 'persona' || undefined}
+              aria-current={rival === 'persona'}
+              onClick={() => empezar({ rival: 'persona', bando, nivel })}
+              className={ACCION_DE_RIVAL}
+            >
+              Dos personas
             </button>
-          )}
-        </div>
+            <button
+              data-inicial={rival === 'maquina' || undefined}
+              aria-current={rival === 'maquina'}
+              onClick={contraLaMaquina}
+              className={ACCION_DE_RIVAL}
+            >
+              Contra la Máquina
+            </button>
+            {eleccion.volver && (
+              <button onClick={sesion.volverALaPartida} className={ACCION}>
+                Volver a la partida
+              </button>
+            )}
+          </div>
+          {/* En otra pestaña: la Partida y la Máquina siguen donde estaban. */}
+          <a
+            href={`${import.meta.env.BASE_URL}avisos/`}
+            target="_blank"
+            className="flex min-h-11 touch-manipulation items-center px-2 text-lg text-oro italic underline underline-offset-4 hover:text-marfil"
+          >
+            Créditos
+            <span className="sr-only"> (se abre en otra pestaña)</span>
+          </a>
+        </>
       ) : (
         <>
           <Opciones titulo="Tu Bando" opciones={BANDOS} valor={bando} alCambiar={setBando} />
