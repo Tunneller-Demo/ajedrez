@@ -3,6 +3,7 @@
 @theme {
   --color-noche: #0a0810;
   --color-oro: #d8b25c;
+  --color-oro-apagado: #a89a7c;
   --color-marfil: #f3e8cf;
   --color-peligro: #ff5a5f;
   --color-violeta: #4a3f60;
@@ -29,6 +30,11 @@
     background: var(--color-noche);
     color: var(--color-marfil);
     font-family: var(--font-cormorant);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-marfil);
+    outline-offset: 2px;
   }
 }
 
@@ -121,7 +127,7 @@
   max-height: none;
   text-align: center;
   color: var(--color-marfil);
-  background: radial-gradient(circle at 50% 40%, rgb(70 50 110 / 0.5), rgb(5 4 9 / 0.97) 62%);
+  background: radial-gradient(circle at 50% 40%, rgb(40 28 66 / 0.85), rgb(5 4 9 / 0.97) 62%);
   backdrop-filter: blur(6px);
 }
 

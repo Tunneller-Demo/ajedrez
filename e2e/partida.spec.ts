@@ -486,8 +486,8 @@ test.describe('Partida a dos bajo la ruta base', () => {
 
     expect(await arriba(casilla(page, 'a1'))).toBeLessThan(await arriba(casilla(page, 'a8')))
     expect(await arriba(deBlancas)).toBeLessThan(await arriba(deNegras))
-    await expect(casilla(page, 'h8').getByText('h', { exact: true })).toBeVisible()
-    await expect(casilla(page, 'h8').getByText('8', { exact: true })).toBeVisible()
+    await expect(casilla(page, 'h8').locator('..').getByText('h', { exact: true })).toBeVisible()
+    await expect(casilla(page, 'h8').locator('..').getByText('8', { exact: true })).toBeVisible()
     await expect(deBlancas.getByRole('img', { name: 'peón negro' })).toHaveCount(1)
   })
 

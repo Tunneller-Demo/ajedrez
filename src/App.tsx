@@ -1,4 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
+import { flushSync } from 'react-dom'
 import type { PieceSymbol, Square } from 'chess.js'
 import { EscenaDeJugada } from './EscenaDeJugada'
 import { urlDePieza } from './piezas'
@@ -6,23 +17,14 @@ import {
   bandoContrario,
   type Bando,
   type EstadoDePartida,
-  type Pieza,
   type Resultado,
   type SesionDePartida,
 } from './sesion/sesionDePartida'
+import { nombreDePieza, nombreDelBando, textoDeDeshacer, textoDeJugada, textosDelResultado } from './textos'
 
 const COLUMNAS = 'abcdefgh'
 const CASILLAS = [8, 7, 6, 5, 4, 3, 2, 1].flatMap((fila) => [...COLUMNAS].map((columna) => `${columna}${fila}` as Square))
 const CASILLAS_GIRADAS = [...CASILLAS].reverse()
-
-const NOMBRES: Record<PieceSymbol, { nombre: string; femenino: boolean }> = {
-  k: { nombre: 'rey', femenino: false },
-  q: { nombre: 'dama', femenino: true },
-  r: { nombre: 'torre', femenino: true },
-  b: { nombre: 'alfil', femenino: false },
-  n: { nombre: 'caballo', femenino: false },
-  p: { nombre: 'peón', femenino: false },
-}
 
 const CORONACIONES: { tipo: PieceSymbol; etiqueta: string }[] = [
   { tipo: 'q', etiqueta: 'Dama' },
@@ -31,20 +33,12 @@ const CORONACIONES: { tipo: PieceSymbol; etiqueta: string }[] = [
   { tipo: 'n', etiqueta: 'Caballo' },
 ]
 
-const nombreDelBando = (bando: Bando) => (bando === 'w' ? 'blancas' : 'negras')
-
-function nombreDePieza({ tipo, bando }: Omit<Pieza, 'casilla'>) {
-  const { nombre, femenino } = NOMBRES[tipo]
-  const adjetivo = bando === 'w' ? (femenino ? 'blanca' : 'blanco') : femenino ? 'negra' : 'negro'
-  return `${nombre} ${adjetivo}`
-}
-
-function textosDelResultado(resultado: Resultado) {
-  if (resultado.tipo === 'jaque-mate') return { titulo: 'Jaque mate', detalle: `ganan las ${nombreDelBando(resultado.ganador)}` }
-  if (resultado.tipo === 'ahogado') return { titulo: 'Ahogado', detalle: 'tablas' }
-  if (resultado.motivo === '50-jugadas') return { titulo: 'Tablas', detalle: 'por la regla de las 50 jugadas' }
-  if (resultado.motivo === 'triple-repeticion') return { titulo: 'Tablas', detalle: 'por triple repetición' }
-  return { titulo: 'Tablas', detalle: 'por material insuficiente' }
+// Filas y columnas de pantalla: el DOM sigue el orden visual, también con el tablero girado.
+const PASOS: Record<string, [fila: number, columna: number]> = {
+  ArrowUp: [-1, 0],
+  ArrowDown: [1, 0],
+  ArrowLeft: [0, -1],
+  ArrowRight: [0, 1],
 }
 
 function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {
@@ -60,9 +54,22 @@ function textoDelTurno({ resultado, turno, jaque }: EstadoDePartida) {
   return resultado.tipo === 'tablas' ? `${titulo} ${detalle}` : `${titulo}: ${detalle}`
 }
 
-const COORDENADA = 'absolute font-cinzel text-[clamp(9px,1.6vmin,13px)] leading-none text-oro'
+// La placa mantiene el contraste en las casillas resaltadas y cuando la coordenada cae sobre una pieza.
+// Los 3px mínimos del borde la dejan fuera del contorno de foco, que se pinta encima.
+const COORDENADA =
+  'pointer-events-none absolute bg-noche/75 px-px font-cinzel text-[clamp(9px,1.6vmin,13px)] leading-none text-oro'
 
-function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoDePartida; sesion: SesionDePartida }) {
+function Casilla({
+  casilla,
+  activa,
+  estado,
+  sesion,
+}: {
+  casilla: Square
+  activa: boolean
+  estado: EstadoDePartida
+  sesion: SesionDePartida
+}) {
   const pieza = estado.piezas.find((p) => p.casilla === casilla)
   const destino = estado.destinos.find((d) => d.casilla === casilla)
   const seleccionada = estado.seleccion === casilla
@@ -73,47 +80,156 @@ function Casilla({ casilla, estado, sesion }: { casilla: Square; estado: EstadoD
   const etiqueta = [casilla, pieza && nombreDePieza(pieza), destino && 'casilla válida'].filter(Boolean).join(', ')
 
   return (
-    <button
-      aria-label={etiqueta}
-      aria-pressed={seleccionada}
-      aria-describedby={ultima ? 'ultima-jugada' : undefined}
-      onClick={() => sesion.tocarCasilla(casilla)}
-      className={[
-        'relative aspect-square touch-manipulation bg-linear-135',
-        clara ? 'from-violeta to-violeta-hondo' : 'from-ebano to-ebano-hondo',
-      ].join(' ')}
-    >
-      {(seleccionada || ultima) && (
-        <span
-          aria-hidden
-          className={`absolute inset-0 ring-1 ring-oro/55 ring-inset ${seleccionada ? 'bg-oro/40' : 'bg-oro/20'}`}
-        />
-      )}
-      {pieza && (
-        <img
-          src={urlDePieza(pieza.bando, pieza.tipo)}
-          alt=""
-          draggable={false}
-          className={`absolute inset-0 size-full select-none ${enVuelo ? 'invisible' : ''}`}
-        />
+    <div className="relative aspect-square">
+      <button
+        data-casilla={casilla}
+        tabIndex={activa ? 0 : -1}
+        aria-label={etiqueta}
+        aria-pressed={seleccionada}
+        aria-describedby={ultima ? 'ultima-jugada' : undefined}
+        onClick={() => sesion.tocarCasilla(casilla)}
+        className={[
+          'relative block size-full touch-manipulation bg-linear-135 focus-visible:-outline-offset-2',
+          clara ? 'from-violeta to-violeta-hondo' : 'from-ebano to-ebano-hondo',
+        ].join(' ')}
+      >
+        {(seleccionada || ultima) && (
+          <span
+            aria-hidden
+            className={`absolute inset-0 ring-1 ring-oro/55 ring-inset ${seleccionada ? 'bg-oro/40' : 'bg-oro/20'}`}
+          />
+        )}
+        {pieza && (
+          <img
+            src={urlDePieza(pieza.bando, pieza.tipo)}
+            alt=""
+            draggable={false}
+            className={`absolute inset-0 size-full select-none ${enVuelo ? 'invisible' : ''}`}
+          />
+        )}
+        {destino && (
+          <span
+            aria-hidden
+            className={
+              destino.captura
+                ? 'absolute inset-[15%] z-[1] rotate-45 border border-peligro shadow-[0_0_14px_var(--color-peligro),inset_0_0_14px_var(--color-peligro)]'
+                : 'absolute inset-[41%] rotate-45 bg-oro shadow-[0_0_12px_var(--color-oro)]'
+            }
+          />
+        )}
+      </button>
+      {/* Fuera del botón: rotulan la fila y la columna, y el nombre de la casilla ya las dice. */}
+      {casilla[1] === (estado.girado ? '8' : '1') && (
+        <span aria-hidden className={`${COORDENADA} right-[max(6%,3px)] bottom-[max(4%,3px)]`}>{casilla[0]}</span>
       )}
       {casilla[0] === (estado.girado ? 'h' : 'a') && (
-        <span aria-hidden className={`${COORDENADA} top-[4%] left-[5%]`}>{casilla[1]}</span>
+        <span aria-hidden className={`${COORDENADA} top-[max(4%,3px)] left-[max(5%,3px)]`}>{casilla[1]}</span>
       )}
-      {casilla[1] === (estado.girado ? '8' : '1') && (
-        <span aria-hidden className={`${COORDENADA} right-[6%] bottom-[4%]`}>{casilla[0]}</span>
-      )}
-      {destino && (
-        <span
-          aria-hidden
-          className={
-            destino.captura
-              ? 'absolute inset-[15%] z-[1] rotate-45 border border-peligro shadow-[0_0_14px_var(--color-peligro),inset_0_0_14px_var(--color-peligro)]'
-              : 'absolute inset-[41%] rotate-45 bg-oro shadow-[0_0_12px_var(--color-oro)]'
-          }
+    </div>
+  )
+}
+
+function EleccionDeCoronacion({ bando, sesion }: { bando: Bando; sesion: SesionDePartida }) {
+  function alPulsarTecla(evento: KeyboardEvent<HTMLDivElement>) {
+    // Tocar cualquier casilla cancela la Coronación pendiente.
+    if (evento.key === 'Escape') return sesion.tocarCasilla('a1')
+    const paso = PASOS[evento.key]
+    if (!paso || evento.altKey || evento.ctrlKey || evento.metaKey) return
+    evento.preventDefault()
+    const piezas = [...evento.currentTarget.querySelectorAll('button')]
+    const indice = piezas.indexOf(evento.target as HTMLButtonElement)
+    piezas[(indice + paso[1] + piezas.length) % piezas.length].focus()
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label="Elige la pieza de la Coronación"
+      onKeyDown={alPulsarTecla}
+      className="absolute inset-x-0 inset-y-[37.5%] z-10 flex justify-center border-y border-oro bg-noche/95"
+    >
+      {CORONACIONES.map(({ tipo, etiqueta }, indice) => (
+        <button
+          key={tipo}
+          autoFocus={indice === 0}
+          aria-label={etiqueta}
+          onClick={() => sesion.coronar(tipo)}
+          className="aspect-square h-full cursor-pointer touch-manipulation focus-visible:-outline-offset-2"
+        >
+          <img src={urlDePieza(bando, tipo)} alt="" className="size-full" />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Tablero({
+  estado,
+  capaAbierta,
+  sesion,
+}: {
+  estado: EstadoDePartida
+  capaAbierta: boolean
+  sesion: SesionDePartida
+}) {
+  const [activa, setActiva] = useState<Square>('e2')
+  const tablero = useRef<HTMLDivElement>(null)
+  const tapado = capaAbierta || Boolean(estado.coronacion)
+  const tapadoAntes = useRef(tapado)
+
+  // Lo que se cierra sin un foco al que volver (la Coronación, una capa tras recargar) lo deja en el tablero.
+  useEffect(() => {
+    if (tapadoAntes.current && !tapado && document.activeElement === document.body) {
+      tablero.current?.querySelector<HTMLElement>('[data-casilla][tabindex="0"]')?.focus()
+    }
+    tapadoAntes.current = tapado
+  }, [tapado])
+
+  function alPulsarTecla(evento: KeyboardEvent<HTMLDivElement>) {
+    const paso = PASOS[evento.key]
+    const casillas = [...evento.currentTarget.querySelectorAll<HTMLElement>('[data-casilla]')]
+    const indice = casillas.indexOf(evento.target as HTMLElement)
+    if (!paso || indice < 0 || evento.altKey || evento.ctrlKey || evento.metaKey) return
+    evento.preventDefault()
+    const fila = Math.floor(indice / 8) + paso[0]
+    const columna = (indice % 8) + paso[1]
+    if (fila >= 0 && fila < 8 && columna >= 0 && columna < 8) casillas[fila * 8 + columna].focus()
+  }
+
+  function alEnfocar({ target }: FocusEvent<HTMLDivElement>) {
+    if (target.dataset.casilla) setActiva(target.dataset.casilla as Square)
+  }
+
+  return (
+    <div
+      ref={tablero}
+      role="group"
+      aria-label="Tablero"
+      aria-describedby="ayuda-del-tablero"
+      onKeyDown={alPulsarTecla}
+      onFocus={alEnfocar}
+      className="relative grid grid-cols-8 shadow-[0_0_70px_rgb(0_0_0/0.8)] ring-1 ring-oro/65"
+    >
+      {/* Durante la Coronación ninguna casilla entra en el orden de Tab: quedan tapadas por la elección. */}
+      {(estado.girado ? CASILLAS_GIRADAS : CASILLAS).map((casilla) => (
+        <Casilla
+          key={casilla}
+          casilla={casilla}
+          activa={!estado.coronacion && casilla === activa}
+          estado={estado}
+          sesion={sesion}
+        />
+      ))}
+      {estado.jugadaEnEscena && (
+        <EscenaDeJugada
+          key={estado.historial.length}
+          jugada={estado.jugadaEnEscena}
+          girado={estado.girado}
+          sesion={sesion}
         />
       )}
-    </button>
+      {estado.coronacion && <EleccionDeCoronacion bando={estado.turno} sesion={sesion} />}
+    </div>
   )
 }
 
@@ -164,7 +280,7 @@ function Historial({ historial }: { historial: string[] }) {
 }
 
 const ACCION =
-  'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase enabled:hover:text-marfil disabled:cursor-default disabled:opacity-40 lateral:h-9 compacta:h-11'
+  'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase not-aria-disabled:hover:text-marfil aria-disabled:cursor-default aria-disabled:text-oro-apagado lateral:h-9 compacta:h-11'
 
 // Va al final del DOM de cada pantalla, para no robar el foco inicial de las capas.
 function BotonDeSilencio({ sesion }: { sesion: SesionDePartida }) {
@@ -188,11 +304,13 @@ function BotonDeSilencio({ sesion }: { sesion: SesionDePartida }) {
 // El efecto de diseño cierra el dialog antes de desmontarlo, para que el foco vuelva a donde estaba.
 function Capa({
   titulo,
+  descripcion,
   alCancelar,
   clase = '',
   children,
 }: {
   titulo: string
+  descripcion?: string
   alCancelar: () => void
   clase?: string
   children: ReactNode
@@ -206,7 +324,13 @@ function Capa({
   }, [])
 
   return (
-    <dialog ref={dialogo} aria-label={titulo} onCancel={alCancelar} className={`capa ${clase}`}>
+    <dialog
+      ref={dialogo}
+      aria-label={titulo}
+      aria-describedby={descripcion}
+      onCancel={alCancelar}
+      className={`capa ${clase}`}
+    >
       {children}
     </dialog>
   )
@@ -215,15 +339,30 @@ function Capa({
 const TITULO_DE_CAPA = 'text-5xl leading-none text-marfil italic lateral:text-7xl compacta:text-5xl'
 const ACCIONES_DE_CAPA = 'mt-4 flex w-full max-w-md flex-wrap justify-center gap-x-6 gap-y-1 px-4'
 
-function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: SesionDePartida }) {
+function PantallaFinal({
+  resultado,
+  deshacer,
+  sesion,
+}: {
+  resultado: Resultado
+  deshacer: () => void
+  sesion: SesionDePartida
+}) {
   const { titulo, detalle } = textosDelResultado(resultado)
   const mate = resultado.tipo === 'jaque-mate'
 
   return (
-    <Capa titulo={titulo} alCancelar={sesion.verLaPartida} clase={mate ? 'escena-de-mate' : ''}>
+    <Capa
+      titulo={titulo}
+      descripcion="detalle-del-resultado"
+      alCancelar={sesion.verLaPartida}
+      clase={mate ? 'escena-de-mate' : ''}
+    >
       {mate && <img src={urlDePieza(resultado.ganador, 'k')} alt="" className="rey-vencedor" />}
       <h2 className={TITULO_DE_CAPA}>{titulo}</h2>
-      <p className="mt-2 font-cinzel text-sm tracking-[0.3em] text-oro uppercase">{detalle}</p>
+      <p id="detalle-del-resultado" className="mt-2 font-cinzel text-sm tracking-[0.3em] text-oro uppercase">
+        {detalle}
+      </p>
       <div className={ACCIONES_DE_CAPA}>
         <button onClick={sesion.empezar} className={ACCION}>
           Jugar otra vez
@@ -231,7 +370,7 @@ function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: Se
         <button onClick={sesion.verLaPartida} className={ACCION}>
           Ver la partida
         </button>
-        <button onClick={sesion.deshacer} className={ACCION}>
+        <button onClick={deshacer} className={ACCION}>
           Deshacer
         </button>
       </div>
@@ -240,13 +379,21 @@ function PantallaFinal({ resultado, sesion }: { resultado: Resultado; sesion: Se
   )
 }
 
-function EleccionDePartida({ aviso, sesion }: { aviso: boolean; sesion: SesionDePartida }) {
+function EleccionDePartida({
+  aviso,
+  empezar,
+  sesion,
+}: {
+  aviso: boolean
+  empezar: () => void
+  sesion: SesionDePartida
+}) {
   return (
     <Capa titulo="Nueva partida" alCancelar={sesion.volverALaPartida}>
       <h2 className={TITULO_DE_CAPA}>Nueva partida</h2>
       {aviso && <p className="mt-3 text-2xl italic">La partida en curso se perderá</p>}
       <div className={ACCIONES_DE_CAPA}>
-        <button onClick={sesion.empezar} className={ACCION}>
+        <button onClick={empezar} className={ACCION}>
           Empezar
         </button>
         <button onClick={sesion.volverALaPartida} className={ACCION}>
@@ -260,8 +407,29 @@ function EleccionDePartida({ aviso, sesion }: { aviso: boolean; sesion: SesionDe
 
 export function App({ sesion }: { sesion: SesionDePartida }) {
   const estado = useSyncExternalStore(sesion.suscribir, sesion.obtenerEstado)
+  const [anuncio, setAnuncio] = useState('')
   const [arriba, abajo]: Bando[] = estado.girado ? ['w', 'b'] : ['b', 'w']
   const luzAbajo = estado.turno === abajo
+
+  // Un texto idéntico al anterior no cambiaría el DOM, y el lector de pantalla callaría.
+  function anunciar(texto: string) {
+    setAnuncio((previo) => (previo === texto ? `${texto} ` : texto))
+  }
+
+  useEffect(() => sesion.alJugar((jugada) => anunciar(textoDeJugada(jugada))), [sesion])
+
+  // «Deshacer» no lleva `disabled`: el foco se perdería al llegar al inicio de la Partida.
+  function deshacer() {
+    if (!sesion.obtenerEstado().historial.length) return
+    sesion.deshacer()
+    anunciar(textoDeDeshacer(sesion.obtenerEstado().turno))
+  }
+
+  // Cerrar la capa devuelve el foco a «Nueva partida»; aquí la Partida empieza y el foco va al tablero.
+  function empezar() {
+    flushSync(sesion.empezar)
+    document.querySelector<HTMLElement>('[data-casilla][tabindex="0"]')?.focus()
+  }
 
   return (
     <>
@@ -280,44 +448,24 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         <span id="ultima-jugada" hidden>
           Última Jugada
         </span>
+        <span id="ayuda-del-tablero" hidden>
+          Muévete con las flechas y selecciona con Enter
+        </span>
+        <p role="status" aria-live="polite" className="sr-only">
+          {anuncio}
+        </p>
         <div className="mx-auto w-(--lado) [grid-area:escena]">
           <Capturadas bando={arriba} estado={estado} />
-          <div className="relative grid grid-cols-8 shadow-[0_0_70px_rgb(0_0_0/0.8)] ring-1 ring-oro/65">
-            {(estado.girado ? CASILLAS_GIRADAS : CASILLAS).map((casilla) => (
-              <Casilla key={casilla} casilla={casilla} estado={estado} sesion={sesion} />
-            ))}
-            {estado.jugadaEnEscena && (
-              <EscenaDeJugada
-                key={estado.historial.length}
-                jugada={estado.jugadaEnEscena}
-                girado={estado.girado}
-                sesion={sesion}
-              />
-            )}
-            {estado.coronacion && (
-              <div
-                role="group"
-                aria-label="Elige la pieza de la Coronación"
-                className="absolute inset-x-0 inset-y-[37.5%] z-10 flex justify-center border-y border-oro bg-noche/95"
-              >
-                {CORONACIONES.map(({ tipo, etiqueta }) => (
-                  <button
-                    key={tipo}
-                    aria-label={etiqueta}
-                    onClick={() => sesion.coronar(tipo)}
-                    className="aspect-square h-full cursor-pointer touch-manipulation"
-                  >
-                    <img src={urlDePieza(estado.turno, tipo)} alt="" className="size-full" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <Tablero
+            estado={estado}
+            capaAbierta={Boolean(estado.eleccion || (estado.pantallaFinal && estado.resultado))}
+            sesion={sesion}
+          />
           <Capturadas bando={abajo} estado={estado} />
         </div>
         <Historial historial={estado.historial} />
         <div className="flex w-full gap-1 px-1 [grid-area:acciones] lateral:px-0">
-          <button onClick={sesion.deshacer} disabled={!estado.historial.length} className={ACCION}>
+          <button onClick={deshacer} aria-disabled={!estado.historial.length} className={ACCION}>
             Deshacer
           </button>
           <button onClick={sesion.girar} className={ACCION}>
@@ -330,9 +478,9 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         <BotonDeSilencio sesion={sesion} />
       </main>
       {estado.eleccion ? (
-        <EleccionDePartida aviso={estado.eleccion.aviso} sesion={sesion} />
+        <EleccionDePartida aviso={estado.eleccion.aviso} empezar={empezar} sesion={sesion} />
       ) : (
-        estado.pantallaFinal && estado.resultado && <PantallaFinal resultado={estado.resultado} sesion={sesion} />
+        estado.pantallaFinal && estado.resultado && <PantallaFinal resultado={estado.resultado} deshacer={deshacer} sesion={sesion} />
       )}
     </>
   )
