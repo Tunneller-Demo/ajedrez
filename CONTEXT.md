@@ -20,6 +20,10 @@ _Avoid_: Oponente, adversario
 El Rival que lleva un Bando de la Partida en lugar de una persona.
 _Avoid_: Bot, IA, CPU, motor
 
+**Motor de la Máquina**:
+El programa de ajedrez, sustituible, que calcula las Jugadas de la Máquina. No es un Rival: el Rival es la Máquina.
+_Avoid_: IA, bot
+
 **Nivel**:
 La fuerza con la que juega la Máquina en una Partida.
 _Avoid_: Dificultad
