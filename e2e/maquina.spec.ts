@@ -224,6 +224,66 @@ test.describe('Partida contra la Máquina bajo la ruta base', () => {
     await expect(page.locator('.pieza-de-la-maquina')).toHaveCSS('animation-name', 'none')
   })
 
+  test.describe('al recargar a mitad de Partida', () => {
+    const lateral = (page: Page) => page.getByText('Contra la Máquina · Fácil')
+    const historial = (page: Page) => page.getByRole('list', { name: 'Historial' }).getByRole('listitem')
+
+    test('con turno de la Máquina, ella juega y la Partida sigue', async ({ page }) => {
+      await empezarContraLaMaquina(page)
+      await jugar(page, 'e2 e4')
+      await expect(piensa(page)).toBeVisible()
+
+      await page.reload()
+
+      await expect(capa(page)).toHaveCount(0)
+      await expect(lateral(page)).toBeVisible()
+      await expect(page.getByRole('status')).toHaveText(/^La Máquina juega /, { timeout: 15_000 })
+      await expect(turnoDeBlancas(page)).toBeVisible()
+
+      await jugar(page, 'a2 a3')
+      await expect(turnoDeBlancas(page)).toBeVisible()
+      await expect(historial(page)).toHaveCount(2)
+      await expect(historial(page).nth(1).locator('span').nth(2)).not.toBeEmpty()
+    })
+
+    test('con turno de la persona, el motor se descarga sin pedir Jugada', async ({ page }) => {
+      await empezarContraLaMaquina(page)
+      await jugar(page, 'e2 e4')
+      await expect(turnoDeBlancas(page)).toBeVisible()
+
+      const descarga = page.waitForRequest('**/motor/*.js')
+      await page.reload()
+      await descarga
+
+      await expect(capa(page)).toHaveCount(0)
+      await expect(turnoDeBlancas(page)).toBeVisible()
+      await expect(historial(page).first().locator('span').nth(2)).not.toBeEmpty()
+      await expect(historial(page)).toHaveCount(1)
+
+      await jugar(page, 'd2 d4')
+      await expect(turnoDeBlancas(page)).toBeVisible()
+      await expect(historial(page)).toHaveCount(2)
+    })
+
+    test('con negras conserva el tablero girado, y anuncia que la Máquina se prepara', async ({ page }) => {
+      await empezarContraLaMaquina(page, 'Negras')
+      await expect(page.getByText('Turno de las negras')).toBeVisible()
+      await jugar(page, 'e7 e5')
+      await page.route('**/motor/*', async (ruta) => {
+        await new Promise((pasar) => setTimeout(pasar, 1500))
+        await ruta.continue()
+      })
+
+      await page.reload()
+
+      await expect(page.getByRole('status')).toHaveText('La Máquina se prepara')
+      const arriba = async (nombre: string) => (await casilla(page, nombre).boundingBox())!.y
+      expect(await arriba('a1')).toBeLessThan(await arriba('a8'))
+      await expect(page.getByText('Turno de las negras')).toBeVisible({ timeout: 15_000 })
+      await expect(historial(page)).toHaveCount(2)
+    })
+  })
+
   test.describe('con prefers-reduced-motion', () => {
     test.use({ contextOptions: { reducedMotion: 'reduce' } })
 

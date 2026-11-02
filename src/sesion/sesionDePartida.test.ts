@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Square } from 'chess.js'
 import type { JugadaDeMaquina, MotorDeMaquina, Nivel } from '../maquina/motor'
+import { textoDelRival } from '../textos'
 import {
   crearSesionDePartida,
   type Almacen,
@@ -37,8 +38,8 @@ function almacenEnMemoria(): Almacen {
 const CLAVE_DE_PARTIDA = 'ajedrez-de-gala:partida'
 const CLAVE_DE_ELECCION = 'ajedrez-de-gala:eleccion'
 
-// Una Partida contra la Máquina con motor y reloj a mano: nada avanza hasta que la prueba lo dice.
-function contraLaMaquina(eleccion: Partial<Eleccion> = {}, sorteos: number[] = [], almacen = almacenEnMemoria()) {
+// Motor y reloj a mano: nada avanza hasta que la prueba lo dice.
+function conMotorAMano(almacen: Almacen, sorteos: number[] = []) {
   const pedidos: { fen: string; nivel: Nivel; responder(jugada: JugadaDeMaquina | null): void; fallar(): void }[] = []
   const esperas: { ms: number; pasar(): void }[] = []
   // Los avisos de espera corren aparte de la pausa, que es lo que esperan casi todas las pruebas.
@@ -68,14 +69,19 @@ function contraLaMaquina(eleccion: Partial<Eleccion> = {}, sorteos: number[] = [
   })
   const anuncios: Espera[] = []
   sesion.alEsperar((espera) => anuncios.push(espera))
-  sesion.empezar({ rival: 'maquina', bando: 'w', nivel: 'facil', ...eleccion })
-  motor.cancelaciones = 0
   return { sesion, pedidos, esperas, avisos, anuncios, motor, almacen }
+}
+
+function contraLaMaquina(eleccion: Partial<Eleccion> = {}, sorteos: number[] = [], almacen = almacenEnMemoria()) {
+  const partida = conMotorAMano(almacen, sorteos)
+  partida.sesion.empezar({ rival: 'maquina', bando: 'w', nivel: 'facil', ...eleccion })
+  partida.motor.cancelaciones = 0
+  return partida
 }
 
 const asentar = () => new Promise((resolver) => setTimeout(resolver))
 
-async function responder({ pedidos, esperas }: ReturnType<typeof contraLaMaquina>, jugada: JugadaDeMaquina | null) {
+async function responder({ pedidos, esperas }: ReturnType<typeof conMotorAMano>, jugada: JugadaDeMaquina | null) {
   pedidos.shift()!.responder(jugada)
   esperas.shift()!.pasar()
   await asentar()
@@ -1964,5 +1970,149 @@ describe('preselección', () => {
     sesion.empezar({ rival: 'maquina', bando: 'b', nivel: 'facil' })
 
     expect(sesion.obtenerEstado().partida).toEqual({ rival: 'maquina', bando: 'b', nivel: 'facil' })
+  })
+})
+
+describe('recuperar una Partida contra la Máquina', () => {
+  // Recarga la página: una sesión nueva sobre el mismo almacén, que la interfaz reanuda al montarse.
+  function recargar({ almacen }: { almacen: Almacen }) {
+    const partida = conMotorAMano(almacen)
+    partida.sesion.reanudar()
+    return partida
+  }
+
+  it('con turno de la Máquina pide su Jugada y la aplica', async () => {
+    const antes = contraLaMaquina()
+    jugar(antes.sesion, 'e2 e4')
+
+    const partida = recargar(antes)
+
+    expect(partida.pedidos).toHaveLength(1)
+    expect(partida.motor.preparaciones).toBe(1)
+    expect(partida.sesion.obtenerEstado().maquinaPiensa).toBe(true)
+
+    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
+
+    expect(partida.sesion.obtenerEstado()).toMatchObject({ turno: 'w', maquinaPiensa: false })
+    expect(piezaEn(partida.sesion.obtenerEstado(), 'e5')).toEqual({ casilla: 'e5', tipo: 'p', bando: 'b' })
+  })
+
+  it('con turno de la persona prepara el motor sin pedir Jugada', () => {
+    const partida = recargar(contraLaMaquina())
+
+    expect(partida.motor.preparaciones).toBe(1)
+    expect(partida.pedidos).toHaveLength(0)
+    expect(partida.sesion.obtenerEstado()).toMatchObject({ turno: 'w', maquinaPiensa: false, maquinaSePrepara: false })
+  })
+
+  it('con turno de la persona, el motor no la retrasa si aún no ha cargado', () => {
+    const { sesion, pedidos } = recargar(contraLaMaquina())
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+
+    expect(pedidos).toHaveLength(1)
+    expect(sesion.obtenerEstado().historial).toEqual(['e4'])
+  })
+
+  it('el Nivel recuperado es el que se usa y el lateral lo muestra', () => {
+    const { sesion, pedidos } = recargar(contraLaMaquina({ bando: 'b', nivel: 'dificil' }))
+
+    expect(pedidos[0].nivel).toBe('dificil')
+    expect(textoDelRival(sesion.obtenerEstado().partida)).toBe('Contra la Máquina · Difícil')
+  })
+
+  it('restaura el Bando sin pasar por la elección y con el tablero girado para negras', () => {
+    const { sesion } = recargar(contraLaMaquina({ bando: 'b' }))
+
+    expect(sesion.obtenerEstado()).toMatchObject({
+      partida: { rival: 'maquina', bando: 'b', nivel: 'facil' },
+      girado: true,
+      eleccion: null,
+    })
+  })
+
+  it('con blancas el tablero no se gira', () => {
+    expect(recargar(contraLaMaquina()).sesion.obtenerEstado().girado).toBe(false)
+  })
+
+  it('anuncia que la Máquina se prepara a quien ya escucha al reanudar', () => {
+    const antes = contraLaMaquina()
+    jugar(antes.sesion, 'e2 e4')
+
+    expect(recargar(antes).anuncios).toEqual(['prepara'])
+  })
+
+  it('reanudar solo actúa una vez: repetirlo no duplica el pedido ni la pausa', () => {
+    const antes = contraLaMaquina()
+    jugar(antes.sesion, 'e2 e4')
+    const { sesion, pedidos, esperas } = recargar(antes)
+
+    sesion.reanudar()
+
+    expect(pedidos).toHaveLength(1)
+    expect(esperas).toHaveLength(1)
+  })
+
+  it('una Partida terminada no pide ninguna Jugada a la Máquina', () => {
+    const almacen = almacenEnMemoria()
+    almacen.escribir(CLAVE_DE_PARTIDA, JSON.stringify({ pgn: mate, rival: 'maquina', bando: 'w', nivel: 'medio' }))
+    const { sesion, pedidos, motor } = recargar({ almacen })
+
+    expect(pedidos).toHaveLength(0)
+    expect(motor.preparaciones).toBe(1)
+    expect(sesion.obtenerEstado()).toMatchObject({ maquinaPiensa: false, pantallaFinal: true })
+  })
+
+  it('Deshacer interrumpe a la Máquina recuperada y una respuesta tardía se descarta', async () => {
+    const antes = contraLaMaquina()
+    jugar(antes.sesion, 'e2 e4')
+    const partida = recargar(antes)
+
+    partida.sesion.deshacer()
+    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
+
+    expect(partida.sesion.obtenerEstado()).toMatchObject({ historial: [], turno: 'w', maquinaPiensa: false })
+  })
+
+  it('una Partida a dos recuperada sigue a dos y no toca el motor', () => {
+    const almacen = almacenEnMemoria()
+    const sesion = conAlmacen(almacen)
+    sesion.empezar({ rival: 'persona', bando: 'w', nivel: 'medio' })
+    jugar(sesion, 'e2 e4')
+
+    const { sesion: recuperada, motor, pedidos } = recargar({ almacen })
+
+    expect(recuperada.obtenerEstado().partida.rival).toBe('persona')
+    expect(motor.preparaciones).toBe(0)
+    expect(pedidos).toHaveLength(0)
+  })
+
+  it('un guardado sin Rival cuenta como Partida a dos', () => {
+    const almacen = almacenEnMemoria()
+    almacen.escribir(CLAVE_DE_PARTIDA, JSON.stringify({ pgn: '1. e4' }))
+
+    expect(recargar({ almacen }).sesion.obtenerEstado()).toMatchObject({
+      partida: { rival: 'persona' },
+      historial: ['e4'],
+      eleccion: null,
+    })
+  })
+
+  it.each([
+    ['un Bando desconocido', { bando: 'x', nivel: 'medio' }],
+    ['«Al azar» como Bando', { bando: 'azar', nivel: 'medio' }],
+    ['un Nivel desconocido', { bando: 'w', nivel: 'imposible' }],
+    ['sin Nivel', { bando: 'w' }],
+    ['un Rival desconocido', { rival: 'gato', bando: 'w', nivel: 'medio' }],
+  ])('un guardado contra la Máquina con %s cuenta como si no existiera', (_caso, datos) => {
+    const almacen = almacenEnMemoria()
+    almacen.escribir(CLAVE_DE_PARTIDA, JSON.stringify({ pgn: '1. e4', rival: 'maquina', ...datos }))
+
+    const { sesion, pedidos } = recargar({ almacen })
+
+    expect(sesion.obtenerEstado()).toMatchObject({ partida: { rival: 'persona' }, historial: [] })
+    expect(sesion.obtenerEstado().eleccion).not.toBeNull()
+    expect(pedidos).toHaveLength(0)
   })
 })

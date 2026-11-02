@@ -2,6 +2,7 @@
 import { Chess, type Color, type Move, type PieceSymbol, type Square } from 'chess.js'
 import type { MotorDeMaquina, Nivel } from '../maquina/motor'
 import {
+  A_DOS,
   guardarEleccion,
   guardarPartida,
   guardarSilencio,
@@ -84,6 +85,8 @@ export type SesionDePartida = {
   // Sin elección repite la preselección.
   empezar(eleccion?: Eleccion): void
   prepararMaquina(): void
+  // Tras recuperar una Partida, cuando la interfaz ya escucha. Solo actúa la primera vez.
+  reanudar(): void
   verLaPartida(): void
   abrirEleccion(): void
   volverALaPartida(): void
@@ -96,8 +99,6 @@ export type SesionDePartida = {
 }
 
 export const bandoContrario = (bando: Bando): Bando => (bando === 'w' ? 'b' : 'w')
-
-const A_DOS: DatosDePartida = { rival: 'persona', bando: null, nivel: null }
 
 // Tiempo mínimo que la Máquina se toma antes de jugar, aunque el motor responda enseguida.
 const PAUSA_DE_LA_MAQUINA = 900
@@ -146,15 +147,16 @@ function efectoDeJugada(resultado: Resultado | null, jaque: boolean, captura: bo
 
 export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependencias): SesionDePartida {
   const restaurada = restaurarPartida(almacen)
-  const chess = restaurada ?? new Chess()
+  const chess = restaurada?.chess ?? new Chess()
 
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
   const oyentesDeEspera = new Set<(espera: Espera) => void>()
   let hayPartida = restaurada !== null
-  let partida = A_DOS
+  let porReanudar = restaurada !== null
+  let partida = restaurada?.partida ?? A_DOS
   let preseleccion = restaurarEleccion(almacen)
-  let girado = false
+  let girado = partida.bando === 'b'
   let finalCerrado = false
   let eleccionAbierta = !restaurada
   let jugadaEnEscena: EventoDeJugada | null = null
@@ -345,6 +347,13 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
       })
   }
 
+  function reanudar() {
+    if (!porReanudar) return
+    porReanudar = false
+    if (estado.maquinaPiensa) turnoDeLaMaquina()
+    else if (partida.rival === 'maquina') prepararMaquina()
+  }
+
   function verLaPartida() {
     finalCerrado = true
     publicar(estado.seleccion, estado.coronacion)
@@ -382,6 +391,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     girar,
     empezar,
     prepararMaquina,
+    reanudar,
     verLaPartida,
     abrirEleccion,
     volverALaPartida,

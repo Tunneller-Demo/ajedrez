@@ -547,6 +547,9 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
   // Al empezar con negras, la región de anuncios cambia de nodo a la vez: el texto debe llegar después para oírse.
   useEffect(() => sesion.alEsperar((espera) => setTimeout(() => anunciar(textoDeEspera(espera)))), [sesion])
 
+  // Va tras las suscripciones: la Máquina recuperada anuncia su espera nada más montarse la página.
+  useEffect(() => sesion.reanudar(), [sesion])
+
   // «Deshacer» no lleva `disabled`: el foco se perdería al llegar al inicio de la Partida.
   function deshacer() {
     if (!sesion.obtenerEstado().puedeDeshacer) return

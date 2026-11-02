@@ -9,6 +9,8 @@ const CLAVE_DE_PARTIDA = 'ajedrez-de-gala:partida'
 const CLAVE_DE_SILENCIO = 'ajedrez-de-gala:silencio'
 const CLAVE_DE_ELECCION = 'ajedrez-de-gala:eleccion'
 
+export const A_DOS: DatosDePartida = { rival: 'persona', bando: null, nivel: null }
+
 const ELECCION_POR_DEFECTO: Eleccion = { rival: 'persona', bando: 'w', nivel: 'medio' }
 const RIVALES: Eleccion['rival'][] = ['persona', 'maquina']
 const BANDOS: Eleccion['bando'][] = ['w', 'b', 'azar']
@@ -24,13 +26,18 @@ export function guardarPartida(almacen: Almacen, chess: Chess, partida: DatosDeP
 }
 
 // loadPgn puede fallar tras aplicar parte de las Jugadas: un guardado dañado cuenta como si no existiera.
-export function restaurarPartida(almacen: Almacen) {
+export function restaurarPartida(almacen: Almacen): { chess: Chess; partida: DatosDePartida } | null {
   try {
     const texto = almacen.leer(CLAVE_DE_PARTIDA)
     if (!texto) return null
+    const { pgn, rival, bando, nivel } = JSON.parse(texto) as Guardado
     const chess = new Chess()
-    chess.loadPgn((JSON.parse(texto) as Guardado).pgn)
-    return chess
+    chess.loadPgn(pgn)
+    if (rival && !RIVALES.includes(rival)) return null
+    // Los guardados anteriores a la Máquina no llevan Rival: son Partidas a dos.
+    if (rival !== 'maquina') return { chess, partida: A_DOS }
+    if ((bando !== 'w' && bando !== 'b') || !NIVELES.includes(nivel)) return null
+    return { chess, partida: { rival, bando, nivel } }
   } catch {
     return null
   }
