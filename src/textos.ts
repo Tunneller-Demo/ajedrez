@@ -1,7 +1,7 @@
 // Lo que la interfaz dice de la Partida, en pantalla y al lector de pantalla.
 import type { PieceSymbol, Square } from 'chess.js'
 import type { Nivel } from './maquina/motor'
-import type { Bando, DatosDePartida, EventoDeJugada, Pieza, Resultado } from './sesion/sesionDePartida'
+import type { Bando, DatosDePartida, Espera, EventoDeJugada, Pieza, Resultado } from './sesion/sesionDePartida'
 
 const NOMBRES: Record<PieceSymbol, { nombre: string; femenino: boolean }> = {
   k: { nombre: 'rey', femenino: false },
@@ -77,3 +77,5 @@ export function textoDelRival({ rival, nivel }: DatosDePartida) {
 }
 
 export const textoDeDeshacer = (turno: Bando) => `Jugada deshecha, juegan las ${nombreDelBando(turno)}`
+
+export const textoDeEspera = (espera: Espera) => (espera === 'prepara' ? 'La Máquina se prepara' : 'La Máquina piensa')

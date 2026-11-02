@@ -5,6 +5,7 @@ import {
   crearSesionDePartida,
   type Almacen,
   type Eleccion,
+  type Espera,
   type EstadoDePartida,
   type EventoDeJugada,
   type SesionDePartida,
@@ -40,13 +41,20 @@ const CLAVE_DE_ELECCION = 'ajedrez-de-gala:eleccion'
 function contraLaMaquina(eleccion: Partial<Eleccion> = {}, sorteos: number[] = [], almacen = almacenEnMemoria()) {
   const pedidos: { fen: string; nivel: Nivel; responder(jugada: JugadaDeMaquina | null): void; fallar(): void }[] = []
   const esperas: { ms: number; pasar(): void }[] = []
-  const motor = { preparaciones: 0, cancelaciones: 0 }
+  // Los avisos de espera corren aparte de la pausa, que es lo que esperan casi todas las pruebas.
+  const avisos: { ms: number; pasar(): void }[] = []
+  const preparaciones: (() => void)[] = []
+  const motor = {
+    preparaciones: 0,
+    cancelaciones: 0,
+    listo: () => preparaciones.forEach((resolver) => resolver()),
+  }
   const sesion = crearSesionDePartida({
     almacen,
     motor: {
       preparar() {
         motor.preparaciones++
-        return new Promise(() => {})
+        return new Promise((resolver) => preparaciones.push(resolver))
       },
       pedirJugada: (fen, nivel) =>
         new Promise((responder, rechazar) => {
@@ -55,12 +63,14 @@ function contraLaMaquina(eleccion: Partial<Eleccion> = {}, sorteos: number[] = [
       // No responde: así las pruebas pueden comprobar que una respuesta tardía se descarta.
       cancelar: () => void motor.cancelaciones++,
     },
-    reloj: { esperar: (ms) => new Promise((pasar) => esperas.push({ ms, pasar })) },
+    reloj: { esperar: (ms) => new Promise((pasar) => (ms === 900 ? esperas : avisos).push({ ms, pasar })) },
     azar: () => sorteos.shift() ?? 0,
   })
+  const anuncios: Espera[] = []
+  sesion.alEsperar((espera) => anuncios.push(espera))
   sesion.empezar({ rival: 'maquina', bando: 'w', nivel: 'facil', ...eleccion })
   motor.cancelaciones = 0
-  return { sesion, pedidos, esperas, motor, almacen }
+  return { sesion, pedidos, esperas, avisos, anuncios, motor, almacen }
 }
 
 const asentar = () => new Promise((resolver) => setTimeout(resolver))
@@ -1522,19 +1532,6 @@ describe('turno de la Máquina', () => {
     expect(pedidos).toHaveLength(1)
   })
 
-  it('Deshacer su Jugada le devuelve el turno y vuelve a pedir', async () => {
-    const partida = contraLaMaquina()
-    const { sesion, pedidos } = partida
-
-    jugar(sesion, 'e2 e4')
-    sesion.terminarAnimacion()
-    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
-    sesion.deshacer()
-
-    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: true })
-    expect(pedidos).toHaveLength(1)
-  })
-
   it('empezar con otra elección descarta la respuesta pendiente', async () => {
     const { sesion, pedidos, esperas, motor } = contraLaMaquina()
 
@@ -1561,6 +1558,337 @@ describe('turno de la Máquina', () => {
 
     expect(motor.cancelaciones).toBe(0)
     expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5'])
+  })
+})
+
+describe('Deshacer contra la Máquina', () => {
+  const e5 = { desde: 'e7', hasta: 'e5', coronacion: null } as const
+
+  // Las negras dan el mate de la coz; la Máquina, con blancas, juega f3 y g4.
+  async function hastaElMateDeNegras(partida: ReturnType<typeof contraLaMaquina>) {
+    const { sesion } = partida
+    await responder(partida, { desde: 'f2', hasta: 'f3', coronacion: null })
+    sesion.terminarAnimacion()
+    jugar(sesion, 'e7 e5')
+    sesion.terminarAnimacion()
+    await responder(partida, { desde: 'g2', hasta: 'g4', coronacion: null })
+    sesion.terminarAnimacion()
+    jugar(sesion, 'd8 h4')
+    sesion.terminarAnimacion()
+  }
+
+  it('retira Jugadas hasta que vuelve a tocar a la persona, y la Máquina no vuelve a pedir', async () => {
+    const partida = contraLaMaquina()
+    const { sesion, pedidos, motor } = partida
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    await responder(partida, e5)
+    sesion.terminarAnimacion()
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], turno: 'w', maquinaPiensa: false })
+    expect(pedidos).toEqual([])
+    expect(motor.cancelaciones).toBe(1)
+  })
+
+  it('con su Jugada aún en escena también retira las dos', async () => {
+    const partida = contraLaMaquina()
+    const { sesion } = partida
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    await responder(partida, e5)
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], jugadaEnEscena: null, maquinaPiensa: false })
+  })
+
+  it('si la persona acaba de terminar la Partida, retira solo esa Jugada', async () => {
+    const partida = contraLaMaquina({ bando: 'b' })
+    const { sesion, pedidos } = partida
+
+    await hastaElMateDeNegras(partida)
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({
+      historial: ['f3', 'e5', 'g4'],
+      turno: 'b',
+      resultado: null,
+      pantallaFinal: false,
+      maquinaPiensa: false,
+    })
+    expect(pedidos).toEqual([])
+  })
+
+  it('si la Máquina da mate, retira su Jugada y la anterior de la persona', async () => {
+    const partida = contraLaMaquina({ bando: 'w' })
+    const { sesion } = partida
+
+    jugar(sesion, 'f2 f3')
+    sesion.terminarAnimacion()
+    await responder(partida, e5)
+    sesion.terminarAnimacion()
+    jugar(sesion, 'g2 g4')
+    sesion.terminarAnimacion()
+    await responder(partida, { desde: 'd8', hasta: 'h4', coronacion: null })
+    sesion.terminarAnimacion()
+    expect(sesion.obtenerEstado().resultado).toEqual({ tipo: 'jaque-mate', ganador: 'b' })
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['f3', 'e5'], turno: 'w', resultado: null })
+  })
+
+  it('con negras, está desactivado si solo está la primera Jugada de la Máquina', async () => {
+    const partida = contraLaMaquina({ bando: 'b' })
+    const { sesion, motor } = partida
+
+    await responder(partida, { desde: 'e2', hasta: 'e4', coronacion: null })
+    sesion.terminarAnimacion()
+    expect(sesion.obtenerEstado().puedeDeshacer).toBe(false)
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], turno: 'b' })
+    expect(motor.cancelaciones).toBe(0)
+  })
+
+  it('con negras, tras la respuesta de la persona vuelve a poder deshacer solo la suya', async () => {
+    const partida = contraLaMaquina({ bando: 'b' })
+    const { sesion } = partida
+
+    await responder(partida, { desde: 'e2', hasta: 'e4', coronacion: null })
+    sesion.terminarAnimacion()
+    jugar(sesion, 'e7 e5')
+    sesion.terminarAnimacion()
+    expect(sesion.obtenerEstado().puedeDeshacer).toBe(true)
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], turno: 'b', puedeDeshacer: false })
+  })
+
+  it('sin Jugadas está desactivado, también mientras la Máquina abre la Partida', () => {
+    expect(contraLaMaquina({ bando: 'w' }).sesion.obtenerEstado().puedeDeshacer).toBe(false)
+    expect(contraLaMaquina({ bando: 'b' }).sesion.obtenerEstado().puedeDeshacer).toBe(false)
+  })
+
+  it('durante la animación de la Jugada de la persona retira esa y no pide nada', () => {
+    const { sesion, pedidos } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    sesion.deshacer()
+    sesion.terminarAnimacion()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], turno: 'w', maquinaPiensa: false })
+    expect(pedidos).toEqual([])
+  })
+
+  it('una respuesta tardía tampoco cae en el turno siguiente', async () => {
+    const { sesion, pedidos, esperas } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.deshacer()
+    jugar(sesion, 'd2 d4')
+    sesion.terminarAnimacion()
+
+    pedidos[0].responder(e5)
+    esperas[0].pasar()
+    await asentar()
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['d4'], maquinaPiensa: true })
+
+    pedidos[1].responder({ desde: 'd7', hasta: 'd5', coronacion: null })
+    esperas[1].pasar()
+    await asentar()
+    expect(sesion.obtenerEstado().historial).toEqual(['d4', 'd5'])
+  })
+
+  it('a dos sigue retirando una sola Jugada', () => {
+    const sesion = nueva()
+
+    jugar(sesion, 'e2 e4', 'e7 e5')
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], puedeDeshacer: true })
+  })
+})
+
+describe('esperas de la Máquina', () => {
+  const e5 = { desde: 'e7', hasta: 'e5', coronacion: null } as const
+
+  async function conMotorListo(eleccion: Partial<Eleccion> = {}) {
+    const partida = contraLaMaquina(eleccion)
+    partida.sesion.prepararMaquina()
+    partida.motor.listo()
+    await asentar()
+    return partida
+  }
+
+  it('sin el motor listo se prepara y sigue la Partida cuando lo está', async () => {
+    const partida = contraLaMaquina()
+    const { sesion, motor } = partida
+
+    jugar(sesion, 'e2 e4')
+    expect(sesion.obtenerEstado()).toMatchObject({ maquinaPiensa: true, maquinaSePrepara: true })
+
+    sesion.terminarAnimacion()
+    motor.listo()
+    await asentar()
+    expect(sesion.obtenerEstado()).toMatchObject({ maquinaPiensa: true, maquinaSePrepara: false })
+
+    await responder(partida, e5)
+    expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5'])
+  })
+
+  it('si el turno llega sin haber preparado el motor, lo prepara', () => {
+    const { motor } = contraLaMaquina({ bando: 'b' })
+
+    expect(motor.preparaciones).toBe(1)
+  })
+
+  it('con el motor listo solo piensa', async () => {
+    const { sesion } = await conMotorListo()
+
+    jugar(sesion, 'e2 e4')
+
+    expect(sesion.obtenerEstado()).toMatchObject({ maquinaPiensa: true, maquinaSePrepara: false })
+  })
+
+  it('no se prepara en el turno de la persona, aunque el motor no esté listo', () => {
+    const { sesion } = contraLaMaquina()
+
+    expect(sesion.obtenerEstado().maquinaSePrepara).toBe(false)
+  })
+
+  it('«se prepara» se anuncia al empezar su turno, una sola vez', async () => {
+    const { sesion, anuncios } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    expect(anuncios).toEqual([])
+
+    sesion.terminarAnimacion()
+    expect(anuncios).toEqual(['prepara'])
+
+    sesion.deshacer()
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.empezar({ rival: 'maquina', bando: 'b', nivel: 'facil' })
+
+    expect(anuncios).toEqual(['prepara'])
+  })
+
+  it('«piensa» solo se anuncia pasados 2 s', async () => {
+    const { sesion, avisos, anuncios } = await conMotorListo()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    expect(avisos.map(({ ms }) => ms)).toEqual([2000])
+    expect(anuncios).toEqual([])
+
+    avisos[0].pasar()
+    await asentar()
+
+    expect(anuncios).toEqual(['piensa'])
+  })
+
+  it('«piensa» no se anuncia si la Máquina ya jugó', async () => {
+    const partida = await conMotorListo()
+    const { sesion, avisos, anuncios } = partida
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    await responder(partida, e5)
+    sesion.terminarAnimacion()
+    jugar(sesion, 'd2 d4')
+    avisos[0].pasar()
+    await asentar()
+
+    expect(anuncios).toEqual([])
+  })
+
+  it('«piensa» no se anuncia si Deshacer cortó el turno', async () => {
+    const { sesion, avisos, anuncios } = await conMotorListo()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.deshacer()
+    avisos[0].pasar()
+    await asentar()
+
+    expect(anuncios).toEqual([])
+  })
+
+  it('mientras el motor se prepara no se anuncia «piensa»', async () => {
+    const { sesion, avisos, anuncios } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    avisos[0].pasar()
+    await asentar()
+
+    expect(anuncios).toEqual(['prepara'])
+  })
+})
+
+describe('con la elección abierta mientras la Máquina piensa', () => {
+  it('su Jugada se aplica sin sonido', async () => {
+    const partida = contraLaMaquina()
+    const eventos = eventosDe(partida.sesion)
+
+    jugar(partida.sesion, 'e2 e4')
+    partida.sesion.terminarAnimacion()
+    partida.sesion.abrirEleccion()
+    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
+
+    expect(eventos.map((evento) => evento.efecto)).toEqual(['mover', null])
+    expect(eventos[1]).toMatchObject({ san: 'e5', deLaMaquina: true })
+  })
+
+  it('tras volver, su siguiente Jugada vuelve a sonar', async () => {
+    const partida = contraLaMaquina()
+    const { sesion } = partida
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.abrirEleccion()
+    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
+    sesion.terminarAnimacion()
+    sesion.volverALaPartida()
+    jugar(sesion, 'd2 d4')
+    sesion.terminarAnimacion()
+    await responder(partida, { desde: 'd7', hasta: 'd5', coronacion: null })
+
+    expect(eventos.map((evento) => evento.efecto)).toEqual(['mover', null, 'mover', 'mover'])
+  })
+
+  it('su jaque mate se muestra al pulsar «Volver a la partida»', async () => {
+    const partida = contraLaMaquina()
+    const { sesion } = partida
+    const eventos = eventosDe(sesion)
+
+    jugar(sesion, 'f2 f3')
+    sesion.terminarAnimacion()
+    await responder(partida, { desde: 'e7', hasta: 'e5', coronacion: null })
+    sesion.terminarAnimacion()
+    jugar(sesion, 'g2 g4')
+    sesion.terminarAnimacion()
+    sesion.abrirEleccion()
+    await responder(partida, { desde: 'd8', hasta: 'h4', coronacion: null })
+    sesion.terminarAnimacion()
+
+    expect(eventos[eventos.length - 1].efecto).toBeNull()
+    expect(sesion.obtenerEstado()).toMatchObject({ eleccion: { aviso: false, volver: true } })
+
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado()).toMatchObject({
+      eleccion: null,
+      pantallaFinal: true,
+      resultado: { tipo: 'jaque-mate', ganador: 'b' },
+    })
   })
 })
 

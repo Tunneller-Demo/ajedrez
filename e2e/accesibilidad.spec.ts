@@ -38,7 +38,7 @@ async function jugarConTeclado(page: Page, ...jugadas: string[]) {
   }
 }
 
-// El motor nunca llega a descargarse: la Máquina se queda pensando lo que dure la prueba.
+// El motor nunca llega a descargarse: la Máquina se queda preparándose lo que dure la prueba.
 async function contraLaMaquinaQuePiensa(page: Page) {
   await page.route('**/motor/*', () => {})
   await boton(page, 'Nueva partida').click()
@@ -46,7 +46,7 @@ async function contraLaMaquinaQuePiensa(page: Page) {
   await boton(page, 'Empezar').click()
   await casilla(page, 'e2').click()
   await casilla(page, 'e4').click()
-  await expect(page.getByText('La Máquina piensa…')).toBeVisible()
+  await expect(page.getByText('La Máquina se prepara…')).toBeVisible()
 }
 
 test.describe('teclado', () => {
@@ -443,7 +443,7 @@ test.describe('contraste AA', () => {
     await contraLaMaquinaQuePiensa(page)
 
     await exigir(NORMAL, { rival: page.getByText('Contra la Máquina · Medio') })
-    await exigir(GRANDE, { piensa: page.getByText('La Máquina piensa…') })
+    await exigir(GRANDE, { piensa: page.getByText('La Máquina se prepara…') })
   })
 })
 

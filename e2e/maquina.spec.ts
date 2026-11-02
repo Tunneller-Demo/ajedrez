@@ -5,7 +5,8 @@ const boton = (ambito: Page | Locator, nombre: string) => ambito.getByRole('butt
 const opcion = (page: Page, nombre: string) => page.getByRole('radio', { name: nombre, exact: true })
 const capa = (page: Page) => page.getByRole('dialog')
 const turnoDeBlancas = (page: Page) => page.getByText('Turno de las blancas')
-const piensa = (page: Page) => page.getByText('La Máquina piensa…')
+// Si el motor tarda en cargar, el turno de la Máquina empieza con «se prepara…».
+const piensa = (page: Page) => page.getByText(/^La Máquina (piensa|se prepara)…/)
 
 async function empezarContraLaMaquina(page: Page, bando = 'Blancas', nivel = 'Fácil') {
   await boton(page, 'Contra la Máquina').click()
@@ -167,12 +168,48 @@ test.describe('Partida contra la Máquina bajo la ruta base', () => {
     await jugar(page, 'e2 e4')
 
     await expect(casilla(page, 'e4')).toHaveAccessibleName(/^e4, peón blanco/)
-    await expect(piensa(page)).toBeVisible()
+    await expect(page.getByText('La Máquina se prepara…')).toBeVisible()
+    await expect(page.getByRole('status')).toHaveText('La Máquina se prepara')
     await expect.poll(() => retenidas).toBeGreaterThan(0)
 
     soltar()
 
     await expect(turnoDeBlancas(page)).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('Deshacer retira también la Jugada de la persona y le devuelve el turno', async ({ page }) => {
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+    await expect(turnoDeBlancas(page)).toBeVisible()
+
+    await boton(page, 'Deshacer').click()
+
+    await expect(casilla(page, 'e2')).toHaveAccessibleName(/^e2, peón blanco/)
+    await expect(page.getByRole('list', { name: 'Historial' }).getByRole('listitem')).toHaveCount(0)
+    await expect(turnoDeBlancas(page)).toBeVisible()
+    await expect(boton(page, 'Deshacer')).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  test('mientras piensa, Deshacer la interrumpe y devuelve el turno', async ({ page }) => {
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+    await expect(piensa(page)).toBeVisible()
+
+    await boton(page, 'Deshacer').click()
+
+    await expect(turnoDeBlancas(page)).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Historial' }).getByRole('listitem')).toHaveCount(0)
+  })
+
+  test('con negras, Deshacer está desactivado tras la primera Jugada de la Máquina', async ({ page }) => {
+    await empezarContraLaMaquina(page, 'Negras')
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+
+    await expect(boton(page, 'Deshacer')).toHaveAttribute('aria-disabled', 'true')
+    await boton(page, 'Deshacer').focus()
+    await page.keyboard.press('Enter')
+
+    await expect(page.getByRole('list', { name: 'Historial' }).getByRole('listitem')).toHaveCount(1)
   })
 
   test('la luz respira mientras piensa y la Jugada de la Máquina vuela', async ({ page }) => {

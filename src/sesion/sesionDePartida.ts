@@ -31,6 +31,7 @@ export type Eleccion = { rival: Rival; bando: Bando | 'azar'; nivel: Nivel }
 export type EstadoDePartida = {
   partida: DatosDePartida
   maquinaPiensa: boolean
+  maquinaSePrepara: boolean
   preseleccion: Eleccion
   piezas: Pieza[]
   turno: Bando
@@ -41,6 +42,7 @@ export type EstadoDePartida = {
   ultimaJugada: UltimaJugada | null
   resultado: Resultado | null
   historial: string[]
+  puedeDeshacer: boolean
   capturadas: Record<Bando, PieceSymbol[]>
   girado: boolean
   pantallaFinal: boolean
@@ -50,6 +52,8 @@ export type EstadoDePartida = {
 }
 
 export type Efecto = 'fin' | 'jaque' | 'capturar' | 'mover'
+
+export type Espera = 'prepara' | 'piensa'
 
 export type EventoDeJugada = {
   bando: Bando
@@ -63,7 +67,8 @@ export type EventoDeJugada = {
   jaque: boolean
   rayos: { desde: Square; hasta: Square }[]
   resultado: Resultado | null
-  efecto: Efecto
+  // Sin efecto no suena: la Jugada llegó con la elección de Partida abierta.
+  efecto: Efecto | null
   deLaMaquina: boolean
 }
 
@@ -87,6 +92,7 @@ export type SesionDePartida = {
   obtenerEstado(): EstadoDePartida
   suscribir(oyente: () => void): () => void
   alJugar(oyente: (evento: EventoDeJugada) => void): () => void
+  alEsperar(oyente: (espera: Espera) => void): () => void
 }
 
 export const bandoContrario = (bando: Bando): Bando => (bando === 'w' ? 'b' : 'w')
@@ -95,6 +101,8 @@ const A_DOS: DatosDePartida = { rival: 'persona', bando: null, nivel: null }
 
 // Tiempo mínimo que la Máquina se toma antes de jugar, aunque el motor responda enseguida.
 const PAUSA_DE_LA_MAQUINA = 900
+// Una espera más corta no se anuncia: el lector de pantalla se saturaría en cada turno.
+const ESPERA_ANUNCIADA = 2000
 
 const FIGURITAS: Record<string, string> = { K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞' }
 
@@ -142,6 +150,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
 
   const oyentes = new Set<() => void>()
   const oyentesDeJugada = new Set<(evento: EventoDeJugada) => void>()
+  const oyentesDeEspera = new Set<(espera: Espera) => void>()
   let hayPartida = restaurada !== null
   let partida = A_DOS
   let preseleccion = restaurarEleccion(almacen)
@@ -152,9 +161,14 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
   let silencio = restaurarSilencio(almacen)
   // Cada pedido al motor lleva su número: una respuesta de un turno ya cortado se descarta.
   let vigencia = 0
+  let motorListo = false
+  let preparaAnunciada = false
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
   const juegaLaMaquina = (bando: Bando) => partida.rival === 'maquina' && bando !== partida.bando
+  // Si le toca a la persona, la última Jugada es de la Máquina: hay que retirar también la anterior, la suya.
+  const jugadasPorDeshacer = () => (chess.turn() === partida.bando ? 2 : 1)
+  const puedeDeshacer = () => chess.history().length >= jugadasPorDeshacer()
 
   function leerEstado(seleccion: Square | null, coronacion: Coronacion | null): EstadoDePartida {
     const destinos = new Map<Square, Destino>()
@@ -168,9 +182,11 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     const capturadas: Record<Bando, PieceSymbol[]> = { w: [], b: [] }
     for (const { color, captured } of jugadas) if (captured) capturadas[color].push(captured)
     const resultado = calcularResultado(chess)
+    const maquinaPiensa = juegaLaMaquina(chess.turn()) && !resultado
     return {
       partida,
-      maquinaPiensa: juegaLaMaquina(chess.turn()) && !resultado,
+      maquinaPiensa,
+      maquinaSePrepara: maquinaPiensa && !motorListo,
       preseleccion,
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
@@ -181,6 +197,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
       ultimaJugada: ultima ? { desde: ultima.from, hasta: ultima.to } : null,
       resultado,
       historial: jugadas.map(({ san }) => conFiguritas(san)),
+      puedeDeshacer: puedeDeshacer(),
       capturadas,
       girado,
       pantallaFinal: Boolean(resultado) && !finalCerrado && !jugadaEnEscena,
@@ -214,7 +231,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
       jaque,
       rayos: rayosDelJaque(chess),
       resultado,
-      efecto: efectoDeJugada(resultado, jaque, Boolean(jugada.captured)),
+      efecto: eleccionAbierta ? null : efectoDeJugada(resultado, jaque, Boolean(jugada.captured)),
       deLaMaquina: juegaLaMaquina(jugada.color),
     }
     jugadaEnEscena = evento
@@ -227,16 +244,32 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     motor.cancelar()
   }
 
+  function avisarEsperas(pedido: number) {
+    const avisar = (espera: Espera) => oyentesDeEspera.forEach((oyente) => oyente(espera))
+    if (!motorListo && !preparaAnunciada) {
+      preparaAnunciada = true
+      avisar('prepara')
+    }
+    reloj.esperar(ESPERA_ANUNCIADA).then(() => {
+      if (pedido === vigencia && motorListo) avisar('piensa')
+    })
+  }
+
   // El motor puede tardar menos que la pausa, o responder algo que no se pueda jugar: su Jugada se valida aquí.
   function turnoDeLaMaquina() {
     if (partida.rival !== 'maquina' || chess.turn() === partida.bando || calcularResultado(chess)) return
     const pedido = ++vigencia
+    prepararMaquina()
+    avisarEsperas(pedido)
     Promise.all([motor.pedirJugada(chess.fen(), partida.nivel), reloj.esperar(PAUSA_DE_LA_MAQUINA)])
       .then(([respuesta]) => {
         if (pedido !== vigencia || !respuesta) return
         const { desde, hasta, coronacion } = respuesta
         const legal = jugadasDesde(desde).find((j) => j.to === hasta && (j.promotion ?? null) === coronacion)
-        if (legal) jugar(legal)
+        if (!legal) return
+        // Corta el aviso de espera pendiente: la Máquina ya no piensa.
+        vigencia++
+        jugar(legal)
       })
       .catch(() => {
         // Un fallo del motor deja a la Máquina pensando.
@@ -264,14 +297,13 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
   }
 
   function deshacer() {
-    if (!chess.history().length) return
+    if (!puedeDeshacer()) return
     cancelarTurno()
-    chess.undo()
+    for (let retiradas = jugadasPorDeshacer(); retiradas > 0; retiradas--) chess.undo()
     guardarPartida(almacen, chess, partida)
     finalCerrado = false
     jugadaEnEscena = null
     publicar(null, null)
-    turnoDeLaMaquina()
   }
 
   function girar() {
@@ -301,9 +333,16 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
   }
 
   function prepararMaquina() {
-    motor.preparar().catch(() => {
-      // El fallo se ve al pedir la primera Jugada.
-    })
+    if (motorListo) return
+    motor
+      .preparar()
+      .then(() => {
+        motorListo = true
+        publicar(estado.seleccion, estado.coronacion)
+      })
+      .catch(() => {
+        // El fallo se ve al pedir la primera Jugada.
+      })
   }
 
   function verLaPartida() {
@@ -356,6 +395,10 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     alJugar(oyente) {
       oyentesDeJugada.add(oyente)
       return () => oyentesDeJugada.delete(oyente)
+    },
+    alEsperar(oyente) {
+      oyentesDeEspera.add(oyente)
+      return () => oyentesDeEspera.delete(oyente)
     },
   }
 }

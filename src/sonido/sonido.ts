@@ -150,6 +150,7 @@ export function conectarSonido(sesion: SesionDePartida) {
   })
 
   sesion.alJugar(({ efecto }) => {
+    if (!efecto) return
     // Sin animaciones no hay vuelo que esperar.
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return sonar(efecto)
     const pendiente = setTimeout(() => {

@@ -27,6 +27,7 @@ import {
   nombreDePieza,
   nombreDelBando,
   textoDeDeshacer,
+  textoDeEspera,
   textoDeJugada,
   textoDelRival,
   textosDelResultado,
@@ -57,11 +58,13 @@ const PASOS: Record<string, [fila: number, columna: number]> = {
   ArrowRight: [0, 1],
 }
 
-function textoDelTurno({ resultado, turno, jaque, maquinaPiensa }: EstadoDePartida) {
+function textoDelTurno({ resultado, turno, jaque, maquinaPiensa, maquinaSePrepara }: EstadoDePartida) {
   if (!resultado) {
     return (
       <>
-        {maquinaPiensa ? 'La Máquina piensa…' : `Turno de las ${nombreDelBando(turno)}`}
+        {maquinaPiensa
+          ? `${textoDeEspera(maquinaSePrepara ? 'prepara' : 'piensa')}…`
+          : `Turno de las ${nombreDelBando(turno)}`}
         {jaque && <em className="text-peligro"> · Jaque</em>}
       </>
     )
@@ -541,9 +544,12 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
 
   useEffect(() => sesion.alJugar((jugada) => anunciar(textoDeJugada(jugada))), [sesion])
 
+  // Al empezar con negras, la región de anuncios cambia de nodo a la vez: el texto debe llegar después para oírse.
+  useEffect(() => sesion.alEsperar((espera) => setTimeout(() => anunciar(textoDeEspera(espera)))), [sesion])
+
   // «Deshacer» no lleva `disabled`: el foco se perdería al llegar al inicio de la Partida.
   function deshacer() {
-    if (!sesion.obtenerEstado().historial.length) return
+    if (!sesion.obtenerEstado().puedeDeshacer) return
     sesion.deshacer()
     anunciar(textoDeDeshacer(sesion.obtenerEstado().turno))
   }
@@ -593,7 +599,7 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         </div>
         <Historial historial={estado.historial} />
         <div className="flex w-full gap-1 px-1 [grid-area:acciones] lateral:px-0">
-          <button onClick={deshacer} aria-disabled={!estado.historial.length} className={ACCION}>
+          <button onClick={deshacer} aria-disabled={!estado.puedeDeshacer} className={ACCION}>
             Deshacer
           </button>
           <button onClick={sesion.girar} className={ACCION}>

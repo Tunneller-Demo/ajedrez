@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { textoDeDeshacer, textoDeJugada, textoDelRival } from './textos'
+import { textoDeDeshacer, textoDeEspera, textoDeJugada, textoDelRival } from './textos'
 import type { EventoDeJugada } from './sesion/sesionDePartida'
 
 const jugada = (cambios: Partial<EventoDeJugada>): EventoDeJugada => ({
@@ -17,6 +17,15 @@ const jugada = (cambios: Partial<EventoDeJugada>): EventoDeJugada => ({
   efecto: 'mover',
   deLaMaquina: false,
   ...cambios,
+})
+
+describe('texto de una espera de la Máquina', () => {
+  it.each([
+    ['prepara', 'La Máquina se prepara'],
+    ['piensa', 'La Máquina piensa'],
+  ] as const)('%s dice «%s»', (espera, texto) => {
+    expect(textoDeEspera(espera)).toBe(texto)
+  })
 })
 
 describe('texto hablado de una Jugada', () => {
