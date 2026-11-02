@@ -1,0 +1,8 @@
+Motor de la Máquina: Stockfish.js 19.0.1, build lite-single, sin modificar.
+Licencia: GPLv3, en Copying.txt, junto a este archivo.
+
+Código fuente correspondiente:
+https://github.com/nmrugg/stockfish.js/tree/v19.0.1
+
+Red neuronal (nn-61e7af4bb97d.nnue), de Chris Bao (sscg13):
+https://tests.stockfishchess.org/api/nn/nn-61e7af4bb97d.nnue
