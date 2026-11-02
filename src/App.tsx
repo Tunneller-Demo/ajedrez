@@ -23,6 +23,7 @@ import {
   type SesionDePartida,
 } from './sesion/sesionDePartida'
 import {
+  AVISO_DE_FALLO,
   NIVELES,
   nombreDePieza,
   nombreDelBando,
@@ -303,6 +304,25 @@ function Historial({ historial }: { historial: string[] }) {
 const ACCION =
   'h-11 flex-auto cursor-pointer touch-manipulation px-1 font-cinzel text-xs leading-tight tracking-[0.14em] text-oro uppercase not-aria-disabled:hover:text-marfil aria-disabled:cursor-default aria-disabled:text-oro-apagado lateral:h-9 compacta:h-11'
 
+// Una franja y no una capa: Deshacer y «Nueva partida» deben seguir al alcance.
+function AvisoDeFallo({ reintentar, seguirADos }: { reintentar: () => void; seguirADos: () => void }) {
+  return (
+    <div className="absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 border-y border-oro bg-noche/95 px-2 py-1 text-center">
+      <p role="alert" className="text-xl leading-tight italic">
+        {AVISO_DE_FALLO}
+      </p>
+      <div className="flex justify-center gap-1">
+        <button autoFocus onClick={reintentar} className={ACCION}>
+          Reintentar
+        </button>
+        <button onClick={seguirADos} className={ACCION}>
+          Seguir a dos
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Va al final del DOM de cada pantalla, para no robar el foco inicial de las capas.
 function BotonDeSilencio({ sesion }: { sesion: SesionDePartida }) {
   const { silencio } = useSyncExternalStore(sesion.suscribir, sesion.obtenerEstado)
@@ -557,10 +577,14 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
     anunciar(textoDeDeshacer(sesion.obtenerEstado().turno))
   }
 
+  function llevarAlTablero(accion: () => void) {
+    flushSync(accion)
+    document.querySelector<HTMLElement>('[data-casilla][tabindex="0"]')?.focus()
+  }
+
   // Cerrar la capa devuelve el foco a «Nueva partida»; aquí la Partida empieza y el foco va al tablero.
   function empezar(eleccion: Eleccion) {
-    flushSync(() => sesion.empezar(eleccion))
-    document.querySelector<HTMLElement>('[data-casilla][tabindex="0"]')?.focus()
+    llevarAlTablero(() => sesion.empezar(eleccion))
   }
 
   return (
@@ -593,11 +617,19 @@ export function App({ sesion }: { sesion: SesionDePartida }) {
         {!estado.eleccion && regionDeAnuncios}
         <div className="mx-auto w-(--lado) [grid-area:escena]">
           <Capturadas bando={arriba} estado={estado} />
-          <Tablero
-            estado={estado}
-            capaAbierta={Boolean(estado.eleccion || (estado.pantallaFinal && estado.resultado))}
-            sesion={sesion}
-          />
+          <div className="relative">
+            <Tablero
+              estado={estado}
+              capaAbierta={Boolean(estado.eleccion || (estado.pantallaFinal && estado.resultado))}
+              sesion={sesion}
+            />
+            {estado.falloDeMaquina && !estado.eleccion && (
+              <AvisoDeFallo
+                reintentar={() => llevarAlTablero(sesion.reintentar)}
+                seguirADos={() => llevarAlTablero(sesion.seguirADos)}
+              />
+            )}
+          </div>
           <Capturadas bando={abajo} estado={estado} />
         </div>
         <Historial historial={estado.historial} />

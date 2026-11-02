@@ -79,3 +79,5 @@ export function textoDelRival({ rival, nivel }: DatosDePartida) {
 export const textoDeDeshacer = (turno: Bando) => `Jugada deshecha, juegan las ${nombreDelBando(turno)}`
 
 export const textoDeEspera = (espera: Espera) => (espera === 'prepara' ? 'La Máquina se prepara' : 'La Máquina piensa')
+
+export const AVISO_DE_FALLO = 'La Máquina no responde. Tu partida sigue guardada'

@@ -33,6 +33,7 @@ export type EstadoDePartida = {
   partida: DatosDePartida
   maquinaPiensa: boolean
   maquinaSePrepara: boolean
+  falloDeMaquina: boolean
   preseleccion: Eleccion
   piezas: Pieza[]
   turno: Bando
@@ -85,6 +86,8 @@ export type SesionDePartida = {
   // Sin elección repite la preselección.
   empezar(eleccion?: Eleccion): void
   prepararMaquina(): void
+  reintentar(): void
+  seguirADos(): void
   // Tras recuperar una Partida, cuando la interfaz ya escucha. Solo actúa la primera vez.
   reanudar(): void
   verLaPartida(): void
@@ -165,6 +168,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
   let vigencia = 0
   let motorListo = false
   let preparaAnunciada = false
+  let falloDeMaquina = false
 
   const jugadasDesde = (casilla: Square) => chess.moves({ square: casilla, verbose: true })
   const juegaLaMaquina = (bando: Bando) => partida.rival === 'maquina' && bando !== partida.bando
@@ -184,11 +188,12 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     const capturadas: Record<Bando, PieceSymbol[]> = { w: [], b: [] }
     for (const { color, captured } of jugadas) if (captured) capturadas[color].push(captured)
     const resultado = calcularResultado(chess)
-    const maquinaPiensa = juegaLaMaquina(chess.turn()) && !resultado
+    const maquinaPiensa = juegaLaMaquina(chess.turn()) && !resultado && !falloDeMaquina
     return {
       partida,
       maquinaPiensa,
       maquinaSePrepara: maquinaPiensa && !motorListo,
+      falloDeMaquina,
       preseleccion,
       piezas: chess.board().flat().flatMap((p) => (p ? [{ casilla: p.square, tipo: p.type, bando: p.color }] : [])),
       turno: chess.turn(),
@@ -257,6 +262,13 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     })
   }
 
+  function avisarDelFallo() {
+    // Corta el aviso de espera pendiente: la Máquina ya no piensa.
+    vigencia++
+    falloDeMaquina = true
+    publicar(estado.seleccion, estado.coronacion)
+  }
+
   // El motor puede tardar menos que la pausa, o responder algo que no se pueda jugar: su Jugada se valida aquí.
   function turnoDeLaMaquina() {
     if (partida.rival !== 'maquina' || chess.turn() === partida.bando || calcularResultado(chess)) return
@@ -268,18 +280,18 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
         if (pedido !== vigencia || !respuesta) return
         const { desde, hasta, coronacion } = respuesta
         const legal = jugadasDesde(desde).find((j) => j.to === hasta && (j.promotion ?? null) === coronacion)
-        if (!legal) return
+        if (!legal) return avisarDelFallo()
         // Corta el aviso de espera pendiente: la Máquina ya no piensa.
         vigencia++
         jugar(legal)
       })
       .catch(() => {
-        // Un fallo del motor deja a la Máquina pensando.
+        if (pedido === vigencia) avisarDelFallo()
       })
   }
 
   function tocarCasilla(casilla: Square) {
-    if (estado.resultado || estado.maquinaPiensa) return
+    if (estado.resultado || estado.maquinaPiensa || estado.falloDeMaquina) return
     if (estado.coronacion) return publicar(null, null)
 
     const { seleccion } = estado
@@ -304,6 +316,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     for (let retiradas = jugadasPorDeshacer(); retiradas > 0; retiradas--) chess.undo()
     guardarPartida(almacen, chess, partida)
     finalCerrado = false
+    falloDeMaquina = false
     jugadaEnEscena = null
     publicar(null, null)
   }
@@ -328,6 +341,7 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     hayPartida = true
     girado = partida.bando === 'b'
     finalCerrado = false
+    falloDeMaquina = false
     eleccionAbierta = false
     jugadaEnEscena = null
     publicar(null, null)
@@ -345,6 +359,25 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
       .catch(() => {
         // El fallo se ve al pedir la primera Jugada.
       })
+  }
+
+  // Publica antes de pedir: si el motor vuelve a fallar al instante, el aviso se monta de nuevo y se oye.
+  function reintentar() {
+    if (!falloDeMaquina) return
+    falloDeMaquina = false
+    // Tras el fallo, el Motor puede tener que cargarse de nuevo.
+    motorListo = false
+    preparaAnunciada = false
+    publicar(estado.seleccion, estado.coronacion)
+    turnoDeLaMaquina()
+  }
+
+  function seguirADos() {
+    if (!falloDeMaquina) return
+    falloDeMaquina = false
+    partida = A_DOS
+    guardarPartida(almacen, chess, partida)
+    publicar(estado.seleccion, estado.coronacion)
   }
 
   function reanudar() {
@@ -391,6 +424,8 @@ export function crearSesionDePartida({ almacen, reloj, motor, azar }: Dependenci
     girar,
     empezar,
     prepararMaquina,
+    reintentar,
+    seguirADos,
     reanudar,
     verLaPartida,
     abrirEleccion,

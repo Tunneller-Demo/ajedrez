@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Square } from 'chess.js'
-import type { JugadaDeMaquina, MotorDeMaquina, Nivel } from '../maquina/motor'
+import { crearMotorDeMaquina, type JugadaDeMaquina, type MotorDeMaquina, type Nivel } from '../maquina/motor'
 import { textoDelRival } from '../textos'
 import {
   crearSesionDePartida,
@@ -1474,27 +1474,24 @@ describe('turno de la Máquina', () => {
     ['ilegal', { desde: 'e7', hasta: 'e1', coronacion: null }],
     ['desde una casilla vacía', { desde: 'a4', hasta: 'a5', coronacion: null }],
     ['con una Coronación que no toca', { desde: 'e7', hasta: 'e5', coronacion: 'q' }],
-    ['vacía', null],
-  ] as const)('una respuesta %s no mueve nada', async (_caso, jugada) => {
+  ] as const)('una respuesta %s no mueve nada y avisa', async (_caso, jugada) => {
     const partida = contraLaMaquina()
 
     jugar(partida.sesion, 'e2 e4')
     partida.sesion.terminarAnimacion()
     await responder(partida, jugada)
 
-    expect(partida.sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: true })
+    expect(partida.sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: false, falloDeMaquina: true })
   })
 
-  it('un motor que falla no mueve nada', async () => {
-    const { sesion, pedidos, esperas } = contraLaMaquina()
+  it('una respuesta vacía viene de cancelar: no mueve nada ni avisa', async () => {
+    const partida = contraLaMaquina()
 
-    jugar(sesion, 'e2 e4')
-    sesion.terminarAnimacion()
-    pedidos[0].fallar()
-    esperas[0].pasar()
-    await asentar()
+    jugar(partida.sesion, 'e2 e4')
+    partida.sesion.terminarAnimacion()
+    await responder(partida, null)
 
-    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: true })
+    expect(partida.sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: true, falloDeMaquina: false })
   })
 
   it('si la Jugada de la persona termina la Partida, no se pide nada y se abre la pantalla final', async () => {
@@ -1564,6 +1561,264 @@ describe('turno de la Máquina', () => {
 
     expect(motor.cancelaciones).toBe(0)
     expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5'])
+  })
+})
+
+describe('cuando la Máquina no responde', () => {
+  const e5 = { desde: 'e7', hasta: 'e5', coronacion: null } as const
+
+  // Con turno de la Máquina tras `e2 e4`, y el motor ya rendido.
+  async function conAviso(eleccion: Partial<Eleccion> = {}, almacen = almacenEnMemoria()) {
+    const partida = contraLaMaquina(eleccion, [], almacen)
+    jugar(partida.sesion, 'e2 e4')
+    partida.sesion.terminarAnimacion()
+    partida.pedidos.shift()!.fallar()
+    await asentar()
+    return partida
+  }
+
+  // El Motor real sobre un Worker de mentira: el reintento vive dentro del Motor.
+  function conWorkerDoble(respuestas: ((worker: Worker) => void)[]) {
+    const creados: Worker[] = []
+    const motor = crearMotorDeMaquina(() => {
+      const worker = {
+        terminate() {},
+        postMessage(linea: string) {
+          if (linea === 'uci') queueMicrotask(() => worker.onmessage?.({ data: 'uciok' } as MessageEvent))
+          if (linea === 'isready') queueMicrotask(() => worker.onmessage?.({ data: 'readyok' } as MessageEvent))
+          if (linea.startsWith('go ')) queueMicrotask(() => respuestas.shift()?.(worker))
+        },
+      } as unknown as Worker
+      creados.push(worker)
+      return worker
+    })
+    const sesion = crearSesionDePartida({
+      almacen: almacenEnMemoria(),
+      motor,
+      reloj: { esperar: () => Promise.resolve() },
+      azar: () => 0,
+    })
+    sesion.empezar({ rival: 'maquina', bando: 'w', nivel: 'facil' })
+    return { sesion, creados }
+  }
+
+  const responde = (notacion: string) => (worker: Worker) => worker.onmessage?.({ data: `bestmove ${notacion}` } as MessageEvent)
+  const revienta = (worker: Worker) => worker.onerror?.({ message: 'memory access out of bounds' } as ErrorEvent)
+
+  it('si el motor se recupera con el reintento, juega sin avisar', async () => {
+    const { sesion, creados } = conWorkerDoble([revienta, responde('e7e5')])
+    const estados: EstadoDePartida[] = []
+    sesion.suscribir(() => estados.push(sesion.obtenerEstado()))
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    await asentar()
+
+    expect(creados).toHaveLength(2)
+    expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5'])
+    expect(estados.some((estado) => estado.falloDeMaquina)).toBe(false)
+  })
+
+  it('si el motor falla también en el reintento, avisa', async () => {
+    const { sesion, creados } = conWorkerDoble([revienta, revienta])
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    await asentar()
+
+    expect(creados).toHaveLength(2)
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], falloDeMaquina: true })
+  })
+
+  it('un pedido rechazado avisa sin esperar la pausa, deja de pensar y la Máquina no juega', async () => {
+    const { sesion, pedidos } = await conAviso()
+
+    expect(sesion.obtenerEstado()).toMatchObject({
+      historial: ['e4'],
+      turno: 'b',
+      maquinaPiensa: false,
+      maquinaSePrepara: false,
+      falloDeMaquina: true,
+    })
+    expect(pedidos).toEqual([])
+  })
+
+  it('corta el anuncio «piensa» pendiente', async () => {
+    const { avisos, anuncios, motor } = await conAviso()
+    motor.listo()
+    await asentar()
+
+    avisos[0].pasar()
+    await asentar()
+
+    expect(anuncios).not.toContain('piensa')
+  })
+
+  it('durante el aviso no se puede mover', async () => {
+    const { sesion } = await conAviso()
+
+    sesion.tocarCasilla('e7')
+    sesion.tocarCasilla('e5')
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], seleccion: null })
+  })
+
+  it('un fallo tras Deshacer se descarta', async () => {
+    const { sesion, pedidos } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.deshacer()
+    pedidos[0].fallar()
+    await asentar()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], falloDeMaquina: false })
+  })
+
+  it('un fallo tras empezar otra Partida se descarta', async () => {
+    const { sesion, pedidos } = contraLaMaquina()
+
+    jugar(sesion, 'e2 e4')
+    sesion.terminarAnimacion()
+    sesion.empezar({ rival: 'persona', bando: 'w', nivel: 'facil' })
+    pedidos[0].fallar()
+    await asentar()
+
+    expect(sesion.obtenerEstado().falloDeMaquina).toBe(false)
+  })
+
+  it('«Reintentar» quita el aviso y repite el turno entero', async () => {
+    const { sesion, pedidos, esperas, anuncios } = await conAviso()
+
+    sesion.reintentar()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ maquinaPiensa: true, falloDeMaquina: false })
+    expect(pedidos).toHaveLength(1)
+    expect(anuncios).toEqual(['prepara', 'prepara'])
+
+    pedidos[0].responder(e5)
+    esperas.forEach((espera) => espera.pasar())
+    await asentar()
+    expect(sesion.obtenerEstado().historial).toEqual(['e4', 'e5'])
+  })
+
+  it('«Reintentar» que vuelve a fallar muestra el aviso de nuevo', async () => {
+    const { sesion, pedidos } = await conAviso()
+
+    sesion.reintentar()
+    pedidos.shift()!.fallar()
+    await asentar()
+
+    expect(sesion.obtenerEstado().falloDeMaquina).toBe(true)
+  })
+
+  it('«Reintentar» sin aviso no hace nada', () => {
+    const { sesion, pedidos } = contraLaMaquina()
+
+    sesion.reintentar()
+
+    expect(pedidos).toEqual([])
+  })
+
+  it('Deshacer durante el aviso retira la Jugada de la persona y le devuelve el turno', async () => {
+    const { sesion, pedidos, almacen } = await conAviso()
+
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], turno: 'w', falloDeMaquina: false, maquinaPiensa: false })
+    expect(pedidos).toEqual([])
+    expect(conAlmacen(almacen).obtenerEstado().historial).toEqual([])
+  })
+
+  it('«Nueva partida» sigue disponible y empezar quita el aviso', async () => {
+    const { sesion } = await conAviso()
+
+    sesion.abrirEleccion()
+    expect(sesion.obtenerEstado().eleccion).toMatchObject({ volver: true })
+    expect(sesion.obtenerEstado().falloDeMaquina).toBe(true)
+    sesion.empezar({ rival: 'persona', bando: 'w', nivel: 'facil' })
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: [], falloDeMaquina: false })
+  })
+
+  it('volver de la elección conserva el aviso', async () => {
+    const { sesion } = await conAviso()
+
+    sesion.abrirEleccion()
+    sesion.volverALaPartida()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ eleccion: null, falloDeMaquina: true })
+  })
+
+  it('sin Jugadas propias, Deshacer sigue desactivado durante el aviso', async () => {
+    const { sesion, pedidos } = contraLaMaquina({ bando: 'b' })
+
+    pedidos.shift()!.fallar()
+    await asentar()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ falloDeMaquina: true, puedeDeshacer: false })
+  })
+
+  it('recargar durante el aviso pide la Jugada otra vez', async () => {
+    const { almacen } = await conAviso()
+
+    const recuperada = conMotorAMano(almacen)
+    recuperada.sesion.reanudar()
+
+    expect(recuperada.sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], maquinaPiensa: true, falloDeMaquina: false })
+    expect(recuperada.pedidos).toHaveLength(1)
+  })
+
+  it('«Seguir a dos» conserva el Historial y el giro, quita el Rival y deja jugar a las dos manos', async () => {
+    const { sesion, pedidos } = await conAviso({ bando: 'b' })
+    const { girado, historial } = sesion.obtenerEstado()
+
+    sesion.seguirADos()
+
+    const estado = sesion.obtenerEstado()
+    expect(estado).toMatchObject({ girado, historial, falloDeMaquina: false, maquinaPiensa: false })
+    expect(estado.partida).toEqual({ rival: 'persona', bando: null, nivel: null })
+    expect(textoDelRival(estado.partida)).toBeNull()
+
+    jugar(sesion, 'a7 a6')
+    sesion.terminarAnimacion()
+    expect(sesion.obtenerEstado()).toMatchObject({ turno: 'w', maquinaPiensa: false })
+    expect(pedidos).toEqual([])
+  })
+
+  it('tras «Seguir a dos», Deshacer retira una sola Jugada', async () => {
+    const { sesion } = await conAviso()
+
+    sesion.seguirADos()
+    jugar(sesion, 'e7 e5')
+    sesion.terminarAnimacion()
+    sesion.deshacer()
+
+    expect(sesion.obtenerEstado()).toMatchObject({ historial: ['e4'], turno: 'b' })
+  })
+
+  it('recuperar tras «Seguir a dos» da una Partida a dos, sin tocar el motor', async () => {
+    const { sesion, almacen } = await conAviso()
+
+    sesion.seguirADos()
+    const recuperada = conMotorAMano(almacen)
+    recuperada.sesion.reanudar()
+
+    expect(recuperada.sesion.obtenerEstado()).toMatchObject({
+      partida: { rival: 'persona', bando: null, nivel: null },
+      historial: ['e4'],
+      maquinaPiensa: false,
+    })
+    expect(recuperada.motor.preparaciones).toBe(0)
+    expect(recuperada.pedidos).toEqual([])
+  })
+
+  it('«Seguir a dos» sin aviso no hace nada', () => {
+    const { sesion } = contraLaMaquina()
+
+    sesion.seguirADos()
+
+    expect(sesion.obtenerEstado().partida.rival).toBe('maquina')
   })
 })
 

@@ -301,3 +301,169 @@ test.describe('Partida contra la Máquina bajo la ruta base', () => {
     })
   })
 })
+
+test.describe('cuando la Máquina no responde', () => {
+  const aviso = (page: Page) => page.getByRole('alert')
+  const lateral = (page: Page) => page.getByText('Contra la Máquina · Fácil')
+  const historial = (page: Page) => page.getByRole('list', { name: 'Historial' }).getByRole('listitem')
+  const casillaConFoco = (page: Page) => page.locator('[data-casilla][tabindex="0"]')
+
+  async function avisoConElFoco(page: Page) {
+    await expect(aviso(page)).toHaveText('La Máquina no responde. Tu partida sigue guardada')
+    await expect(boton(page, 'Reintentar')).toBeFocused()
+  }
+
+  async function conElMotorCaido(page: Page) {
+    await page.route('**/motor/*', (ruta) => ruta.abort())
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+    await avisoConElFoco(page)
+  }
+
+  test('si el motor no descarga, el aviso cabe en pantalla y no deja mover', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await expect(aviso(page)).toBeInViewport({ ratio: 1 })
+    await expect(boton(page, 'Reintentar')).toBeInViewport({ ratio: 1 })
+    await expect(boton(page, 'Seguir a dos')).toBeInViewport({ ratio: 1 })
+    await expect(lateral(page)).toBeVisible()
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+
+    await casilla(page, 'e7').click()
+
+    await expect(casilla(page, 'e7')).toHaveAttribute('aria-pressed', 'false')
+    await expect(historial(page)).toHaveCount(1)
+  })
+
+  test('«Reintentar» falla otra vez con el motor caído y lo recupera cuando vuelve', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await boton(page, 'Reintentar').click()
+    await avisoConElFoco(page)
+
+    await page.unroute('**/motor/*')
+    await boton(page, 'Reintentar').click()
+
+    await expect(aviso(page)).toHaveCount(0)
+    await expect(casillaConFoco(page)).toBeFocused()
+    await expect(page.getByRole('status')).toHaveText(/^La Máquina juega /, { timeout: 15_000 })
+    await expect(turnoDeBlancas(page)).toBeVisible()
+    await expect(lateral(page)).toBeVisible()
+  })
+
+  test('«Seguir a dos» conserva el Historial, deja mover a ambos Bandos y sobrevive a la recarga', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await boton(page, 'Seguir a dos').click()
+
+    await expect(aviso(page)).toHaveCount(0)
+    await expect(casillaConFoco(page)).toBeFocused()
+    await expect(lateral(page)).toHaveCount(0)
+    await expect(historial(page)).toHaveCount(1)
+
+    await jugar(page, 'e7 e5')
+    await expect(turnoDeBlancas(page)).toBeVisible()
+
+    await boton(page, 'Deshacer').click()
+    await expect(casilla(page, 'e7')).toHaveAccessibleName(/^e7, peón negro/)
+    await expect(casilla(page, 'e4')).toHaveAccessibleName(/^e4, peón blanco/)
+
+    await page.reload()
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(aviso(page)).toHaveCount(0)
+    await expect(lateral(page)).toHaveCount(0)
+    await expect(page.getByText('Turno de las negras')).toBeVisible()
+    await jugar(page, 'e7 e5')
+    await expect(turnoDeBlancas(page)).toBeVisible()
+  })
+
+  test('Deshacer retira la Jugada de la persona, le devuelve el turno y quita el aviso', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await boton(page, 'Deshacer').click()
+
+    await expect(aviso(page)).toHaveCount(0)
+    await expect(casilla(page, 'e2')).toHaveAccessibleName(/^e2, peón blanco/)
+    await expect(historial(page)).toHaveCount(0)
+    await expect(turnoDeBlancas(page)).toBeVisible()
+  })
+
+  test('«Nueva partida» sigue disponible: volver recupera el aviso y empezar lo descarta', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await boton(page, 'Nueva partida').click()
+    await expect(aviso(page)).toHaveCount(0)
+    await boton(page, 'Volver a la partida').click()
+    await avisoConElFoco(page)
+
+    await boton(page, 'Nueva partida').click()
+    await boton(page, 'Dos personas').click()
+
+    await expect(capa(page)).toHaveCount(0)
+    await expect(aviso(page)).toHaveCount(0)
+    await expect(historial(page)).toHaveCount(0)
+  })
+
+  test('un fallo con la elección abierta espera a que se vuelva a la Partida', async ({ page }) => {
+    let soltar = () => {}
+    const caida = new Promise<void>((pasar) => (soltar = pasar))
+    await page.route('**/motor/*', async (ruta) => {
+      await caida
+      await ruta.abort()
+    })
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+    await expect(page.getByText('La Máquina se prepara…')).toBeVisible()
+    await boton(page, 'Nueva partida').click()
+
+    soltar()
+
+    await expect(aviso(page)).toHaveCount(0)
+    await boton(page, 'Volver a la partida').click()
+    await avisoConElFoco(page)
+  })
+
+  test('al recargar durante el aviso se vuelve a pedir la Jugada', async ({ page }) => {
+    await conElMotorCaido(page)
+
+    await page.reload()
+
+    await avisoConElFoco(page)
+    await expect(lateral(page)).toBeVisible()
+  })
+
+  test('un .wasm que no llega da el aviso al vencer el tiempo de preparación', async ({ page }) => {
+    // Solo se acorta la espera de 30 s: el resto del camino es el real.
+    await page.addInitScript(() => {
+      const original = window.setTimeout
+      window.setTimeout = ((accion: TimerHandler, ms?: number) =>
+        original(accion, ms === 30_000 ? 2000 : ms)) as typeof window.setTimeout
+    })
+    await page.route('**/motor/*.wasm', (ruta) => ruta.abort())
+    await page.reload()
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+
+    await expect(page.getByText('La Máquina se prepara…')).toBeVisible()
+    await avisoConElFoco(page)
+  })
+
+  test('sin SIMD de WebAssembly da el aviso sin descargar el motor', async ({ page }) => {
+    let descargas = 0
+    await page.route('**/motor/*', (ruta) => {
+      descargas++
+      return ruta.continue()
+    })
+    await page.addInitScript(() => {
+      WebAssembly.validate = () => false
+    })
+    await page.reload()
+
+    await empezarContraLaMaquina(page)
+    await jugar(page, 'e2 e4')
+
+    await avisoConElFoco(page)
+    expect(descargas).toBe(0)
+  })
+})
