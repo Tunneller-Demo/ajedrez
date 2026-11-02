@@ -1,10 +1,10 @@
 // Sonido: síntesis con Web Audio y sala generada en el navegador, sin archivos. Suena con los eventos de la Sesión de
-// Partida. El timbre sale de la muestra prototipo/public/sonidos/index.html.
+// Partida.
 import type { Efecto, SesionDePartida } from '../sesion/sesionDePartida'
 
 // Coincide con --posarse en index.css: el golpe llega cuando la pieza toca la casilla.
 const POSARSE = 480
-// La muestra roza el pico máximo: la holgura y el limitador dejan sitio a los solapes.
+// El timbre roza el pico máximo: la holgura y el limitador dejan sitio a los solapes.
 const HOLGURA = 0.4
 const REGRESO_DE_SALA = 0.35
 
